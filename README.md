@@ -48,6 +48,7 @@ node src/cli.mjs run examples/open-and-shot.json
 
 - **HTTP 探针可能被关掉**：开关打开后 `http://127.0.0.1:9222/json/version` 有时返回 404（本机 Chrome 158 就是这样），所以**以 `DevToolsActivePort` 为准**，HTTP 只作兜底。
 - **端口别抢**：这个开关固定绑定 9222；工具自己的共享窗口默认用 **9333**，两者互不影响。
+- **每跑一次可能要你点一次授权**：Chrome 目前按「每个新连接」弹授权框。如果脚本卡在连接上，去 Chrome 窗口找那个提示点「允许」。想彻底免掉需要常驻连接（daemon），还没做。
 
 想强制验证：
 
@@ -118,14 +119,15 @@ Playwright 原生支持跨进程 iframe，这里直接暴露出来：
 不想为了一个站点保留整份浏览器 profile，或者要在 CI 里复用登录态：
 
 ```bash
-node src/cli.mjs auth save app        # 把当前浏览器的 Cookie 存成快照
-node src/cli.mjs auth list            # 只显示数量与域名个数，不打印域名
+node src/cli.mjs auth save app --for example.com   # 只存这个站点的 Cookie
+node src/cli.mjs auth save all --all               # 存整个浏览器（默认不允许，要显式加 --all）
+node src/cli.mjs auth list                         # 只显示数量与域名个数，不打印域名
 node src/cli.mjs run my.json --auth app
 node src/cli.mjs auth forget app
 ```
 
 快照用与凭据相同的 **DPAPI** 加密，只有本机当前用户能解开。
-**Cookie 等价于登录凭据**，别把文件拷给别人。
+**Cookie 等价于登录凭据**，别把文件拷给别人。附着你自己的浏览器时用 `--auth` 会**把 Cookie 写进那个浏览器**（同名覆盖），CLI 会打一行警告。
 
 ## 零留痕的三道防线
 

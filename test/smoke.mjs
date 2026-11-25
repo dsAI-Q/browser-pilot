@@ -22,6 +22,7 @@ import { VERSION } from '../src/version.mjs';
 import { resolveRef, formatRefs } from '../src/refs.mjs';
 import { readActivePort, attachHelp, defaultChromeUserDataDir } from '../src/attach.mjs';
 import { safeAuthName } from '../src/auth.mjs';
+import { validateAssertText } from '../src/actions.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const NODE = process.execPath;
@@ -147,6 +148,12 @@ check('合法快照名通过', safeAuthName('app-login_1') === 'app-login_1');
 let nameThrew = false;
 try { safeAuthName('../etc/passwd'); } catch { nameThrew = true; }
 check('含路径分隔符的快照名被拒绝', nameThrew);
+
+// 断言必须带期望值：只写 text 的断言会永远成立，等于假通过
+check('带 contains 的断言合法', validateAssertText({ text: '登录', contains: '欢迎' }) === true);
+let assertThrew = false;
+try { validateAssertText({ text: '登录' }); } catch { assertThrew = true; }
+check('只写 text 的 asserttext 被拒绝', assertThrew);
 
 // DPAPI 不可用时必须给明确错误，不能抛原始 EPERM（否则用户不知道该怎么办）
 let dpapiMsg = '';

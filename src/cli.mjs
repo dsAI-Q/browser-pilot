@@ -38,7 +38,7 @@ import {
 import { loadRemembered, saveRemembered } from './creds.mjs';
 import { openSharedSession } from './shared.mjs';
 import { openAttachedSession, AttachUnavailable, attachHelp, readActivePort } from './attach.mjs';
-import { saveAuth, loadAuth, listAuth, forgetAuth } from './auth.mjs';
+import { saveAuth, loadAuth, listAuth, forgetAuth, safeAuthName } from './auth.mjs';
 import { VERSION } from './version.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -77,6 +77,8 @@ function parseArgs(argv) {
     else if (a === '--no-attach') out.noAttach = true;
     else if (a === '--user-data-dir') out.userDataDir = argv[++i];
     else if (a === '--auth') out.auth = argv[++i];
+    else if (a === '--for') out.forHost = argv[++i];
+    else if (a === '--all') out.all = true;
     else if (a.startsWith('-')) {
       process.stderr.write(`未知选项：${a}\n`);
       usage(2);
@@ -216,16 +218,41 @@ async function main() {
     if (sub === 'save') {
       const name = rest[0];
       if (!name) {
-        process.stderr.write('用法：browser-pilot auth save <名字>\n');
+        process.stderr.write('用法：browser-pilot auth save <名字> --for <域名> [--all]\n');
+        return 2;
+      }
+      // 名字先校验，别等浏览器开了才报错（附着你自己的浏览器时那要等一次授权）
+      try {
+        safeAuthName(name);
+      } catch (err) {
+        process.stderr.write(`${err.message}\n`);
         return 2;
       }
       const args = parseArgs(rest.slice(1));
-      const session = await openAnySession(args, '', { interactive: true });
+      // 默认只存一个站点的 Cookie：附着你自己的浏览器时，context.cookies() 会把
+      // 整个浏览器的 Cookie 都读出来，全量落盘既不必要也不安全。
+      const forHost = args.forHost || '';
+      if (!forHost && !args.all) {
+        process.stderr.write(
+          '请指定要保存哪个站点的登录态：auth save <名字> --for example.com\n' +
+            '（确实要存整个浏览器所有站点的 Cookie，再加 --all）\n'
+        );
+        return 2;
+      }
+      const session = await openAnySession(args, forHost, { interactive: true });
       try {
-        const cookies = await session.context.cookies();
+        const all = await session.context.cookies();
+        const cookies = forHost
+          ? all.filter((c) => String(c.domain || '').replace(/^\./, '').endsWith(forHost))
+          : all;
+        if (!cookies.length) {
+          process.stderr.write(`没有匹配 ${forHost} 的 Cookie（是不是还没登录？）\n`);
+          return 1;
+        }
         const r = saveAuth(name, cookies);
+        const domains = new Set(cookies.map((c) => c.domain)).size;
         process.stdout.write(
-          `已保存登录快照 ${name}：${r.count} 个 Cookie（DPAPI 加密）\n${r.file}\n` +
+          `已保存登录快照 ${name}：${r.count} 个 Cookie，${domains} 个域名（DPAPI 加密）\n${r.file}\n` +
             '注意：Cookie 等价于登录凭据，别把这个文件拷给别人。\n'
         );
       } finally {
@@ -370,6 +397,11 @@ async function main() {
   const session = await openAnySession(args, site);
 
   if (authCookies) {
+    if (session.attached) {
+      process.stderr.write(
+        '注意：这是附着你自己的浏览器，载入快照会把其中的 Cookie 写进这个浏览器（同名会被覆盖）。\n'
+      );
+    }
     await session.context.addCookies(authCookies);
   }
 

@@ -86,6 +86,7 @@ export function attachHelp(userDataDir = defaultChromeUserDataDir()) {
     '  2) 在你日常那个 Chrome 里打开 chrome://inspect/#remote-debugging ，把开关勾上',
     '     （勾完页面会显示 Server running at 127.0.0.1:9222）',
     '  3) 首次连接时 Chrome 会弹一个授权框，点「允许」',
+    '     注意：Chrome 目前按「每个新连接」弹一次授权，所以脚本每跑一次可能要你点一次。',
     '',
     `查过的地方：${path.join(userDataDir, 'DevToolsActivePort')} 和 http://127.0.0.1:9222/json/version`,
     '',
@@ -139,8 +140,9 @@ export async function openAttachedSession(opts = {}) {
     browser = await chromium.connectOverCDP(wsUrl, { timeout: Math.max(timeout, 60000) });
   } catch (err) {
     throw new AttachUnavailable(
-      `连接 Chrome 失败（${wsUrl}）。如果 Chrome 刚刚重启过，` +
-        `旧端口可能已过期，重新勾一次开关即可。原始错误：${err.message}`,
+      `连接 Chrome 超时或失败（${wsUrl}）。最常见的原因是 Chrome 里弹出了「允许远程调试」` +
+        `的授权框而没人点：切到 Chrome 窗口找一下那个提示，点「允许」后重试；` +
+        `如果没看到提示，把 chrome://inspect 的开关关掉再打开一次。原始错误：${err.message}`,
       { userDataDir, wsUrl }
     );
   }

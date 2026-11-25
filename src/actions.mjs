@@ -58,6 +58,22 @@ function frameUrl(frame) {
 }
 
 /** 断言类动作：不满足直接抛错，让这一步失败 */
+/** 断言必须有期望值：单独一个 text 只用于定位，不能当期望（否则断言永远成立） */
+export function validateAssertText(step = {}) {
+  if (
+    step.regex === undefined &&
+    step.equals === undefined &&
+    step.contains === undefined &&
+    step.expect === undefined
+  ) {
+    throw new Error(
+      'asserttext 缺少期望值：用 contains / equals / regex 之一说明要断言什么' +
+        '（text 只用于定位元素，不能当期望值）'
+    );
+  }
+  return true;
+}
+
 function failAssert(what, actual) {
   const err = new Error(`断言失败：${what}（实际：${String(actual).slice(0, 200)}）`);
   err.isAssertion = true;
@@ -372,6 +388,7 @@ async function execStep(page, step, ctx, state, entry) {
     }
 
     case 'asserttext': {
+      validateAssertText(step);
       const target = await resolveTarget(page, step, state);
       const actual = (await target.innerText()).trim();
       const expected = step.contains ?? step.expect ?? '';

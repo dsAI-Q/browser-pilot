@@ -18,9 +18,10 @@ browser-pilot — 面向 agent 的受控浏览器操作工具（npm 包名 @dsai
 
 命令：
   browser-pilot run <script.json> [选项]
-  browser-pilot auth save <名字>      把当前浏览器的 Cookie 存成登录快照（DPAPI 加密）
-  browser-pilot auth list             列出快照（只报数量，不打印域名）
-  browser-pilot auth forget <名字>    删除快照
+  browser-pilot auth save <名字> --for <域名>   存该站点的 Cookie 快照（DPAPI 加密）
+  browser-pilot auth save <名字> --all          存整个浏览器的 Cookie（默认不允许）
+  browser-pilot auth list                       列出快照（只报数量，不打印域名）
+  browser-pilot auth forget <名字>              删除快照
 
 选项：
   --out <dir>          输出目录（默认 ./.bp-out/<时间戳>）
