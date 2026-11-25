@@ -22,6 +22,12 @@ browser-pilot — 面向 agent 的受控浏览器操作工具（npm 包名 @dsai
   browser-pilot auth save <名字> --all          存整个浏览器的 Cookie（默认不允许）
   browser-pilot auth list                       列出快照（只报数量，不打印域名）
   browser-pilot auth forget <名字>              删除快照
+  node src/serve.mjs [--attach|--shared]        常驻执行器：一条连接跑多个作业（NDJSON）
+
+常驻连接（一次授权）：
+  DSH 插件默认用它：长活进程持有唯一一条 CDP 连接，Chrome 只在它启动时要一次「允许」。
+  空闲 15 分钟自动退出；pid 写在 %LOCALAPPDATA%\browser-pilot\serve.json。
+  想绕开：browser_run 传 noDaemon: true，或命令行加 --ephemeral。
 
 选项：
   --out <dir>          输出目录（默认 ./.bp-out/<时间戳>）

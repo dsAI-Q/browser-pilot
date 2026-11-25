@@ -50,6 +50,15 @@ node src/cli.mjs run examples/open-and-shot.json
 - **端口别抢**：这个开关固定绑定 9222；工具自己的共享窗口默认用 **9333**，两者互不影响。
 - **每跑一次可能要你点一次授权**：Chrome 目前按「每个新连接」弹授权框。如果脚本卡在连接上，去 Chrome 窗口找那个提示点「允许」。想彻底免掉需要常驻连接（daemon），还没做。
 
+**每跑一次可能要你点一次授权？** 已经不是了——插件默认走**常驻连接**：
+
+- 插件保留一个长活进程（`src/serve.mjs`），由它持有唯一那条 CDP 连接。Chrome 只在**这个进程启动时**要你点一次「允许」，之后所有运行都复用。
+- 这个进程空闲 15 分钟会自己退出（不长期占着你的浏览器）。pid 记在 `%LOCALAPPDATA%\browser-pilot\serve.json`。
+- 想绕过常驻、每次都用一次性进程：给 `browser_run` 传 `noDaemon: true`（或命令行 `--ephemeral`，零留痕场景）。
+- 也可以手动跑：`node src/serve.mjs --attach`，然后在 stdin 里发 NDJSON 作业。
+
+插件里看到 `执行方式：常驻连接（attached·DevToolsActivePort）` 就说明走的是这条路。
+
 想强制验证：
 
 ```bash

@@ -290,6 +290,25 @@ async function execStep(page, step, ctx, state, entry) {
       break;
     }
 
+    case 'pages': {
+      // 诊断用：列出这个浏览器里所有标签的主机名（不含路径与查询），判断选页对不对
+      const list = page
+        .context()
+        .pages()
+        .map((p, i) => {
+          let host = '';
+          try {
+            const u = new URL(p.url());
+            host = u.protocol === 'http:' || u.protocol === 'https:' ? u.host : u.protocol.replace(':', '');
+          } catch {
+            host = 'invalid';
+          }
+          return `${i}:${host || 'blank'}`;
+        });
+      entry.pages = list.join(' | ');
+      break;
+    }
+
     case 'frames': {
       const list = page.frames().map((f, i) => {
         const u = frameUrl(f);

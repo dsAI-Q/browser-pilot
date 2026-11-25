@@ -1,4 +1,4 @@
-- insert:
+﻿- insert:
     - id: browser-pilot
       name: "@dsai-q/browser-pilot"
       config: {}
