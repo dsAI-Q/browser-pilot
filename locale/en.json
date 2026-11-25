@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Browser pilot",
+    "description": "Runs JSON action scripts in a real Chrome browser — navigate, log in, click, fill, scroll, read text and screenshot — with zero retention: no history or cookies on disk, URLs and credentials redacted from every output file, and a post-run leak audit."
+  }
+}

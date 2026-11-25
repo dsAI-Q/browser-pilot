@@ -1,0 +1,153 @@
+/**
+ * DSH 插件入口：把 browser-pilot 的 CLI 暴露成两个 agent 工具。
+ *
+ * 刻意不在 DSH 进程里直接 require('playwright-core')：
+ * 宿主进程解析不到本包的依赖。这里改成子进程调用自带的 CLI，
+ * Playwright 在子进程里跑，宿主保持干净。
+ *
+ * 凭据走 env（BP_USER / BP_PASS）经 stdin 传给子进程，
+ * 从不进入 argv、不进入工具参数、不进入对话。
+ */
+import { execFile } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+
+export const name = 'browser-pilot'
+export const inject = ['tools']
+
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const CLI = path.join(HERE, 'cli.mjs')
+
+const output = {
+  schema: { type: 'string' },
+  render: (_args, value) => [{ type: 'text', text: String(value) }],
+}
+
+const MAX_OUT = 6000
+
+function clip(text, max = MAX_OUT) {
+  const s = String(text ?? '')
+  return s.length > max ? s.slice(0, max) + `\n…（已截断，共 ${s.length} 字）` : s
+}
+
+/**
+ * 跑一次 CLI。凭据从环境变量取，经 stdin 传入，绝不写进命令行参数。
+ */
+function runCli(args, { timeoutMs = 300000 } = {}) {
+  return new Promise((resolve) => {
+    const child = execFile(
+      process.execPath,
+      [CLI, ...args],
+      { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true },
+      (error, stdout, stderr) => {
+        resolve({
+          code: error ? (typeof error.code === 'number' ? error.code : 1) : 0,
+          stdout: String(stdout ?? ''),
+          stderr: String(stderr ?? ''),
+        })
+      }
+    )
+
+    const user = process.env.BP_USER
+    const pass = process.env.BP_PASS
+    if (user || pass) {
+      // 走 --creds-stdin：凭据只存在于子进程的标准输入里
+      child.stdin.write(JSON.stringify({ user, pass }))
+      child.stdin.end()
+    } else if (child.stdin) {
+      child.stdin.end()
+    }
+  })
+}
+
+export function apply(ctx, config = {}) {
+  const workDir = config.workDir || process.cwd()
+  const channel = config.channel || 'chrome'
+  const timeout = Number(config.timeout || 15000)
+
+  ctx.effect(
+    () =>
+      ctx.tools.register({
+        name: 'browser_run',
+        description:
+          'Run a JSON action script in a real Chrome browser and return a per-step transcript plus screenshots. ' +
+          'Zero retention: no browsing history or cookies are written to disk, and URLs and credentials are redacted from every output file. ' +
+          'Supply credentials through the BP_USER / BP_PASS environment variables; a script needs them only when it contains a login action or a valueFrom field.',
+        parameters: {
+          scriptPath: {
+            type: 'string',
+            required: true,
+            description: 'Absolute path of the JSON action script to run.',
+          },
+          outDir: {
+            type: 'string',
+            description: 'Directory for screenshots and the run report. Defaults to a timestamped folder under the working folder.',
+          },
+          headed: {
+            type: 'boolean',
+            description: 'Show the browser window. Omit to run headless.',
+          },
+          credsFile: {
+            type: 'string',
+            description: 'Path of a JSON file holding {"user","pass"}. Use instead of the environment variables; the file is read and never copied.',
+          },
+        },
+        output,
+        async execute({ scriptPath, outDir, headed, credsFile }) {
+          if (!scriptPath) return 'Missing scriptPath.'
+          const args = ['run', path.resolve(workDir, scriptPath)]
+          if (outDir) args.push('--out', path.resolve(workDir, outDir))
+          if (headed) args.push('--headed')
+          args.push('--channel', channel, '--timeout', String(timeout))
+          if (credsFile) args.push('--creds-file', path.resolve(workDir, credsFile))
+          else if (process.env.BP_USER || process.env.BP_PASS) args.push('--creds-stdin')
+          else args.push('--no-prompt')
+
+          const r = await runCli(args)
+          const body = [r.stdout.trim(), r.stderr.trim()].filter(Boolean).join('\n')
+          return clip(`exit ${r.code}\n${body}`)
+        },
+      }),
+    'browser-pilot browser_run'
+  )
+
+  ctx.effect(
+    () =>
+      ctx.tools.register({
+        name: 'browser_shot',
+        description:
+          'Open one URL in a real Chrome browser and save a full screenshot, returning the file path and the page title. ' +
+          'Needs no credentials and never writes browsing history to disk.',
+        parameters: {
+          url: { type: 'string', required: true, description: 'The address to open.' },
+          outDir: { type: 'string', description: 'Directory for the screenshot. Defaults to a timestamped folder.' },
+          fullPage: { type: 'boolean', description: 'Capture the whole scrollable page instead of the viewport.' },
+        },
+        output,
+        async execute({ url, outDir, fullPage }) {
+          if (!url) return 'Missing url.'
+          const dir = path.resolve(workDir, outDir || '.bp-out/shot-' + Date.now())
+          const script = {
+            url,
+            steps: [
+              { type: 'goto', url },
+              { type: 'title' },
+              { type: 'shot', name: 'page', fullPage: !!fullPage },
+            ],
+          }
+          // 脚本放在系统临时目录：输出目录必须由 CLI 自己创建（它只写空目录）
+          const os = await import('node:os')
+          const fs = await import('node:fs/promises')
+          const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bp-shot-'))
+          const tmp = path.join(tmpDir, 'script.json')
+          await fs.writeFile(tmp, JSON.stringify(script), 'utf8')
+
+          const r = await runCli(['run', tmp, '--out', dir, '--no-prompt', '--channel', channel])
+          await fs.rm(tmpDir, { recursive: true, force: true })
+          const body = [r.stdout.trim(), r.stderr.trim()].filter(Boolean).join('\n')
+          return clip(`exit ${r.code}\n${body}`)
+        },
+      }),
+    'browser-pilot browser_shot'
+  )
+}

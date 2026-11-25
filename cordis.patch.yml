@@ -1,0 +1,4 @@
+- insert:
+    - id: browser-pilot
+      name: browser-pilot
+      config: {}
