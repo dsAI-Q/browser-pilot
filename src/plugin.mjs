@@ -48,9 +48,15 @@ function runCli(args, { timeoutMs = 300000 } = {}) {
       }
     )
 
-    const user = process.env.BP_USER
-    const pass = process.env.BP_PASS
-    if (user || pass) {
+    // 凭据来源（按优先级）：BP_CREDS（一行「账号|密码」）→ BP_USER/BP_PASS → DSH 安全卡片同名密钥
+    const pair = process.env.BP_CREDS || process.env.DSH_SECRET_BP_CREDS
+    const user = process.env.BP_USER || process.env.DSH_SECRET_BP_USER
+    const pass = process.env.BP_PASS || process.env.DSH_SECRET_BP_PASS
+    if (pair) {
+      // 原样交给 CLI，由它按「账号|密码」拆开；凭据只出现在子进程的标准输入里
+      child.stdin.write(pair)
+      child.stdin.end()
+    } else if (user || pass) {
       // 走 --creds-stdin：凭据只存在于子进程的标准输入里
       child.stdin.write(JSON.stringify({ user, pass }))
       child.stdin.end()
@@ -72,7 +78,7 @@ export function apply(ctx, config = {}) {
         description:
           'Run a JSON action script in a real Chrome browser and return a per-step transcript plus screenshots. ' +
           'Zero retention: no browsing history or cookies are written to disk, and URLs and credentials are redacted from every output file. ' +
-          'Supply credentials through the BP_USER / BP_PASS environment variables; a script needs them only when it contains a login action or a valueFrom field.',
+          'Credentials are never passed as parameters: they come from the BP_USER / BP_PASS environment variables (or the saved DSH secrets of the same names) and reach the browser through stdin only. A script needs them only when it contains a login action or a valueFrom field.',
         parameters: {
           scriptPath: {
             type: 'string',
@@ -87,20 +93,27 @@ export function apply(ctx, config = {}) {
             type: 'boolean',
             description: 'Show the browser window. Omit to run headless.',
           },
-          credsFile: {
+          profile: {
             type: 'string',
-            description: 'Path of a JSON file holding {"user","pass"}. Use instead of the environment variables; the file is read and never copied.',
+            description:
+              'Persistent Chrome profile directory. Defaults to %LOCALAPPDATA%\\browser-pilot\\profile. Sign in once in the shared window and later runs reuse it without asking for credentials.',
+          },
+          ephemeral: {
+            type: 'boolean',
+            description:
+              'Zero-retention mode: a fresh throwaway context with no cookies or history on disk. Off by default, because it cannot reuse an existing sign-in.',
           },
         },
         output,
-        async execute({ scriptPath, outDir, headed, credsFile }) {
+        async execute({ scriptPath, outDir, headed, profile, ephemeral }) {
           if (!scriptPath) return 'Missing scriptPath.'
           const args = ['run', path.resolve(workDir, scriptPath)]
           if (outDir) args.push('--out', path.resolve(workDir, outDir))
           if (headed) args.push('--headed')
+          if (profile) args.push('--profile', path.resolve(workDir, profile))
+          if (ephemeral) args.push('--ephemeral')
           args.push('--channel', channel, '--timeout', String(timeout))
-          if (credsFile) args.push('--creds-file', path.resolve(workDir, credsFile))
-          else if (process.env.BP_USER || process.env.BP_PASS) args.push('--creds-stdin')
+          if (process.env.BP_CREDS || process.env.DSH_SECRET_BP_CREDS || process.env.BP_USER || process.env.BP_PASS || process.env.DSH_SECRET_BP_USER || process.env.DSH_SECRET_BP_PASS) args.push('--creds-stdin')
           else args.push('--no-prompt')
 
           const r = await runCli(args)

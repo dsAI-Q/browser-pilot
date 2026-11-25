@@ -54,10 +54,16 @@ export async function runSteps(page, steps, ctx) {
             await page.waitForTimeout(Number(step.ms));
             entry.waited = Number(step.ms);
           } else if (step.selector) {
-            await page.locator(step.selector).first().waitFor({ state: step.state || 'visible' });
+            await page
+              .locator(step.selector)
+              .first()
+              .waitFor({ state: step.state || 'visible', timeout: step.timeout });
             entry.waited = 'selector';
           } else if (step.text) {
-            await page.getByText(step.text).first().waitFor({ state: step.state || 'visible' });
+            await page
+              .getByText(step.text)
+              .first()
+              .waitFor({ state: step.state || 'visible', timeout: step.timeout });
             entry.waited = 'text';
           } else {
             throw new Error('wait 需要 ms / selector / text 之一');
@@ -75,8 +81,43 @@ export async function runSteps(page, steps, ctx) {
 
         case 'click': {
           const target = await resolveTarget(page, step);
-          await target.click({ timeout: step.timeout });
+          await target.click({ timeout: step.timeout, force: !!step.force });
           entry.clicked = true;
+          break;
+        }
+
+        case 'dblclick': {
+          const target = await resolveTarget(page, step);
+          await target.dblclick({ timeout: step.timeout, force: !!step.force });
+          entry.dblclicked = true;
+          break;
+        }
+
+        case 'type': {
+          // 键盘输入（用于 contenteditable 之类 fill 不生效的编辑器）
+          if (step.value === undefined) throw new Error('type 缺少 value');
+          if (step.selector || step.text) {
+            const target = await resolveTarget(page, step);
+            await target.click({ timeout: step.timeout, force: !!step.force });
+          }
+          await page.keyboard.type(String(step.value), { delay: Number(step.delay || 25) });
+          entry.typed = true;
+          break;
+        }
+
+        case 'selectall': {
+          // 选中当前焦点内的全部文本（contenteditable 里就是它自己的内容）
+          await page.keyboard.press('Control+A');
+          entry.selectedAll = true;
+          break;
+        }
+
+        case 'bbox': {
+          const target = await resolveTarget(page, step);
+          const box = await target.boundingBox();
+          entry.box = box
+            ? `x=${Math.round(box.x)} y=${Math.round(box.y)} w=${Math.round(box.width)} h=${Math.round(box.height)}`
+            : 'none';
           break;
         }
 
@@ -91,7 +132,7 @@ export async function runSteps(page, steps, ctx) {
             );
           }
           const target = await resolveTarget(page, step);
-          await target.fill(String(value), { timeout: step.timeout });
+          await target.fill(String(value), { timeout: step.timeout, force: !!step.force });
           entry.filled = true;
           break;
         }
@@ -187,6 +228,51 @@ export async function runSteps(page, steps, ctx) {
           } catch {
             entry.urlHost = 'invalid';
           }
+          break;
+        }
+
+        case 'dom': {
+          // 导出某个元素的 HTML 片段：选择器写不出来时，靠它看清结构和图标按钮
+          const t = step.selector
+            ? page.locator(step.selector).first()
+            : await resolveTarget(page, step);
+          const html = await t.evaluate((el) => el.outerHTML);
+          entry.html = ctx.redact(truncate(html, Number(step.max || 3000)));
+          break;
+        }
+
+        case 'probe': {
+          // 列出匹配元素的可点/可输入信息，用于摸清页面结构（选择器写不出来时先看这个）
+          if (!step.selector) throw new Error('probe 缺少 selector');
+          const max = Number(step.max || 20);
+          const loc = page.locator(step.selector);
+          const total = await loc.count();
+          const items = [];
+          for (let k = 0; k < Math.min(total, max); k++) {
+            const el = loc.nth(k);
+            const info = await el
+              .evaluate((node) => ({
+                tag: node.tagName.toLowerCase(),
+                type: node.getAttribute('type') || '',
+                id: node.getAttribute('id') || '',
+                cls: String(node.className || '').slice(0, 60),
+                aria: node.getAttribute('aria-label') || '',
+                ph: node.getAttribute('placeholder') || '',
+                txt: (node.innerText || node.textContent || '').trim().slice(0, 40),
+                vis: !!(node.offsetWidth || node.offsetHeight || node.getClientRects().length),
+              }))
+              .catch(() => null);
+            if (info) items.push(`${k} <${info.tag}${info.type ? ' type=' + info.type : ''}${info.id ? ' id=' + info.id : ''}>${info.vis ? '' : '[hidden]'} ph="${info.ph}" aria="${info.aria}" txt="${info.txt}"`);
+          }
+          entry.probe = { total, items: items.join(' | ') };
+          break;
+        }
+
+        case 'clickxy': {
+          // 图标按钮没有文字与稳定选择器时按坐标点（画布/图形界面常用）
+          if (step.x === undefined || step.y === undefined) throw new Error('clickxy 需要 x / y');
+          await page.mouse.click(Number(step.x), Number(step.y));
+          entry.clickedAt = `${step.x},${step.y}`;
           break;
         }
 

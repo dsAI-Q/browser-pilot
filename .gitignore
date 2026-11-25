@@ -1,5 +1,8 @@
 node_modules/
 .bp-out/
+.bp-profile/
+scripts/
+recon/
 *.log
 .DS_Store
 Thumbs.db

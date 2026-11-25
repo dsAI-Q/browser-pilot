@@ -1,7 +1,7 @@
 # browser-pilot
 
-**Agent-friendly controlled browser automation — zero retention by default.**
-让 AI agent 能真正操作浏览器，但不在你的磁盘上留下任何浏览痕迹。
+**Agent-friendly controlled browser automation.**
+让 AI agent 能真正操作浏览器；登录一次就不再烦你，需要凭据时弹个小窗问，勾了「长期保留」就加密存好。
 
 ---
 
@@ -11,9 +11,19 @@
 
 多数工具默认这么做，而且不告诉你。
 
-这个工具反过来：**它不接管你已经登录的浏览器，而是每次用干净的内存上下文，凭据由你临时提供，用完即焚。** 代价是每次要登录一次；换来的是磁盘上什么都没有。
+这个工具把登录做成了三档，你按需要选：
+
+| 档 | 行为 | 适合 |
+|---|---|---|
+| **共享浏览器（默认）** | 插件自己起一个 Chrome 窗口，**登录一次就一直复用**；窗口关了再打开，登录态还在 | 日常使用：只登录一次，之后 agent 全程自己干 |
+| **弹框 + 长期保留** | 需要账号密码时弹一个小窗口，带「长期保留」勾选；勾了就用 **Windows DPAPI 加密**存盘（只有本机当前用户能解） | 没有扫码登录的站点 |
+| **`--ephemeral` 零留痕** | 每次全新内存上下文，不落 Cookie、不落历史 | 临时查资料、不想留任何登录痕迹 |
+
+为什么会话要复用：**每跑一次都让你重新登录，等于这个工具没法用**。但默认那档也不是「偷偷记账号」——它记的是浏览器自己的登录态，位置在 `%LOCALAPPDATA%\browser-pilot\profile`，你随时可以整个删掉。
 
 ## 零留痕的三道防线
+
+即使开了共享浏览器，输出侧仍然是零留痕的：
 
 | 防线 | 做法 |
 |---|---|
@@ -35,7 +45,7 @@ cd browser-pilot && npm install
 需要 Node ≥ 18，以及本机已安装 Chrome 或 Edge。
 **不会下载 Chromium**——`playwright-core` 复用系统浏览器（`channel: 'chrome'`）。
 
-## 30 秒跑通（会自己问你账号）
+## 30 秒跑通
 
 只有两步：写个脚本，然后运行。
 
@@ -43,19 +53,24 @@ cd browser-pilot && npm install
 browser-pilot run my.json
 ```
 
-脚本里有登录动作时，它会直接问你：
+第一次运行会自己开一个 Chrome 窗口。**你在那个窗口里登录一次**（扫码、账号密码都行），之后所有脚本都复用这个登录态——窗口关了再开也还在。
+
+脚本需要账号密码、而该站点又没登录过时，会**弹一个小窗口**：
 
 ```
-────────────────────────────────────────────
-browser-pilot 需要登录凭据
-目标站点：example.com
-凭据只在内存中使用，不会写入磁盘，也不会出现在日志里。
-────────────────────────────────────────────
-账号（用户名／邮箱／手机号）：me@example.com
-密码（输入时不显示明文）：********
+┌─ browser-pilot 需要登录 ──────────────┐
+│ 登录 www.example.com                  │
+│ 密码只在内存中使用；勾选「长期保留」后  │
+│ 用 Windows 用户级加密保存。            │
+│                                       │
+│   账号  [ me@example.com          ]   │
+│   密码  [ ••••••••                ]   │
+│   [x] 长期保留账号和密码（下次不再询问）│
+│                    [ 登录 ]  [ 取消 ] │
+└───────────────────────────────────────┘
 ```
 
-密码输入显示 `*` 号，不回显明文，也不进命令历史。
+勾了「长期保留」就写进 `%LOCALAPPDATA%\browser-pilot\creds.json`，内容是 **DPAPI 密文**：只有本机当前 Windows 用户能解开，拷到别的机器或别的账户都无效。想清掉直接删这个文件。
 
 **脚本不需要登录时，它一个字都不会问**——打开网页、截图、取文字、点击、滚动，全都不需要凭据，不会打断你。
 
@@ -89,9 +104,13 @@ browser-pilot 需要登录凭据
 
 | 脚本里有 | 会问吗 |
 |---|---|
-| `{ "type": "login", ... }` | ✅ 问账号 + 密码 |
+| 站点**已在共享窗口登录** | ❌ 直接用已登录的会话 |
+| `{ "type": "login", ... }`，且该站点**记住过** | ❌ 自动取 DPAPI 里那组 |
+| `{ "type": "login", ... }`，没记住过 | ✅ 弹窗问账号 + 密码（可勾选长期保留） |
 | `{ "valueFrom": "user" }` / `{ "valueFrom": "pass" }` | ✅ 只问缺的那个 |
 | 只有 `goto` / `shot` / `text` / `click` / `fill`(字面值) / `scroll` | ❌ 一个字都不问 |
+
+想彻底不问、也不存登录态，加 `--ephemeral`；那种模式下就是每次干净开局。
 
 ### 跑测试
 
@@ -124,22 +143,34 @@ npm run smoke
 | type | 作用 | 关键参数 |
 |---|---|---|
 | `goto` | 打开网址 | `url`、`waitUntil` |
-| `wait` | 等待 | `ms` 或 `selector` / `text` + `state` |
+| `wait` | 等待 | `ms` 或 `selector` / `text` + `state` + `timeout` |
 | `shot` | 截图 | `name`、`fullPage` |
-| `click` | 点击 | `selector` / `text` / `role`+`name` / `placeholder` / `label` |
-| `fill` | 填空 | 同上定位 + `value` 或 `valueFrom` |
+| `click` | 点击 | `selector` / `text` / `role`+`name` / `placeholder` / `label`，`force` |
+| `dblclick` | 双击 | 同上定位，`force` |
+| `fill` | 填空（也支持 contenteditable） | 同上定位 + `value` 或 `valueFrom`，`force` |
+| `type` | 键盘逐字输入（编辑器类页面用） | `value`、`delay` |
+| `selectall` | 选中当前焦点内全部文本 | — |
 | `press` | 按键 | `key`（默认 Enter） |
 | `login` | 登录组合动作 | `userSelector`、`passSelector`、`submitSelector` |
 | `text` | 取文字 | 定位（不给则取 body）、`max` |
-| `title` | 取标题 | — |
+| `dom` | 取元素 HTML（摸结构用） | 定位 + `max` |
+| `probe` | 列元素信息（tag/id/class/placeholder/是否可见） | `selector`、`max` |
+| `bbox` | 取元素坐标尺寸 | 定位 |
 | `count` | 元素计数 | `selector` |
+| `title` | 取标题 | — |
+| `url` / `urlhost` | 当前网址 / 只取主机名 | — |
+| `frames` | 列所有框架主机名 | — |
+| `neterrors` | 列失败请求 | `max` |
 | `scroll` | 滚动 | `y` |
+| `clickxy` | 按坐标点击（图标按钮没有选择器时） | `x`、`y` |
+
+坐标类动作（`clickxy`）在窗口尺寸或缩放变化后会失准，**能用选择器就别用坐标**；先 `probe` 找稳定的 `id` / `aria-label` / `data-*`。
 
 ### 凭据怎么给
 
-**默认什么都不用准备**——脚本里写了登录动作，运行时它会问你。
+**默认什么都不用准备**——先在那个共享窗口里登录一次，之后它一直用；需要账号密码时会弹窗问，勾了「长期保留」就加密记住。
 
-其余三种方式（优先级从高到低），适合脚本化、CI、或不想被询问的场景：
+不想让任何东西落盘，就用 `--ephemeral`，凭据只在内存里活一次。其余几种方式（优先级从高到低）适合脚本化、CI：
 
 ```bash
 # 1) 管道传入（agent / 脚本调用推荐）
@@ -150,11 +181,24 @@ set BP_USER=me@example.com
 set BP_PASS=...
 browser-pilot run my.json
 
-# 3) 本地文件（自己控制，别提交进 Git）
+# 3) 一行式：账号|密码
+set BP_CREDS=me@example.com|我的密码
+
+# 4) 本地文件（自己控制，别提交进 Git）
 browser-pilot run my.json --creds-file C:\path\to\creds.json
 ```
 
-非交互环境（CI、管道、被别的程序调用）里缺凭据时，**它不会偷偷弹窗卡住**，而是直接报错并列出这三种方式，退出码 2。
+连弹窗都不许出现时（CI、无桌面环境）加 `--no-gui --no-prompt`：缺凭据会直接报错并列出上面这些传法，退出码 2，绝不挂死。
+
+其他常用选项：
+
+```bash
+--ephemeral        # 零留痕模式（每次干净开局）
+--headed           # 显示浏览器窗口（共享模式下本来就是可见的）
+--cdp-port 9222    # 共享浏览器的调试端口，冲突时换一个
+--profile <dir>    # 指定共享浏览器的配置目录
+--channel msedge   # 用 Edge 而不是 Chrome
+```
 
 脚本文件本身永远只写声明，不写密码：
 

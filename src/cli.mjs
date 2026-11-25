@@ -34,6 +34,8 @@ import {
   promptCredentials,
   credentialsHint,
 } from './prompt.mjs';
+import { loadRemembered, saveRemembered } from './creds.mjs';
+import { openSharedSession } from './shared.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -55,6 +57,10 @@ function parseArgs(argv) {
     else if (a === '--channel') out.channel = argv[++i];
     else if (a === '--timeout') out.timeout = Number(argv[++i]);
     else if (a === '--creds-file') out.credsFile = argv[++i];
+    else if (a === '--profile') out.profile = argv[++i];
+    else if (a === '--ephemeral') out.ephemeral = true;
+    else if (a === '--no-gui') out.noGui = true;
+    else if (a === '--cdp-port') out.cdpPort = Number(argv[++i]);
     else if (a.startsWith('-')) {
       process.stderr.write(`未知选项：${a}\n`);
       usage(2);
@@ -79,10 +85,28 @@ function readJsonFile(p) {
   return JSON.parse(raw.replace(/^\uFEFF/, ''));
 }
 
+/**
+ * 把「账号|密码」这种一行写法拆成 {user, pass}。
+ * 允许的分隔符：| ｜ :: Tab ， , —— 取最先出现的那个。
+ * 账号里不会出现这些字符，密码只按第一个分隔符切，后面的原样保留。
+ */
+function parsePair(raw) {
+  const s = String(raw ?? '');
+  for (const d of ['|', '｜', '::', '\t', '，', ',']) {
+    const i = s.indexOf(d);
+    if (i > 0) return { user: s.slice(0, i).trim(), pass: s.slice(i + d.length) };
+  }
+  return null;
+}
+
 function loadCredentialsFromEnvOrFile(args) {
   if (args.credsStdin) return null; // 由 main 异步读
   if (args.credsFile) return readJsonFile(args.credsFile);
-  const { BP_USER, BP_PASS } = process.env;
+  const { BP_CREDS, BP_USER, BP_PASS } = process.env;
+  if (BP_CREDS) {
+    const pair = parsePair(BP_CREDS);
+    if (pair) return pair;
+  }
   if (BP_USER || BP_PASS) return { user: BP_USER, pass: BP_PASS };
   return null;
 }
@@ -132,7 +156,16 @@ async function main() {
   let credentials = loadCredentialsFromEnvOrFile(args);
   if (args.credsStdin) {
     const raw = await readStdin();
-    if (raw.trim()) credentials = JSON.parse(raw.replace(/^\uFEFF/, ''));
+    if (raw.trim()) {
+      // 允许两种：{"user","pass"} 的 JSON，或一行「账号|密码」
+      let parsed = null;
+      try {
+        parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
+      } catch {
+        parsed = parsePair(raw);
+      }
+      if (parsed) credentials = parsed;
+    }
   }
 
   const need = collectNeeded(steps);
@@ -142,12 +175,39 @@ async function main() {
     (!credentials || (need.user && !credentials.user) || (need.pass && !credentials.pass));
 
   if (missing) {
-    const interactive = process.stdin.isTTY && process.stdout.isTTY;
-    if (args.noPrompt || !interactive) {
+    // 1) 记住过的：直接复用，不问
+    const recalled = loadRemembered(site);
+    if (recalled && (!need.user || recalled.user) && (!need.pass || recalled.pass)) {
+      credentials = recalled;
+      process.stderr.write(`已复用记住的账号：${site}\n`);
+    } else if (!args.noPrompt) {
+      // 2) 图形弹框（带「长期保留」勾选）——agent 也能用，因为不依赖终端
+      const got = args.noGui ? null : askViaGui(site);
+      if (got) {
+        credentials = { user: got.user, pass: got.pass };
+        if (got.remember) {
+          try {
+            const f = saveRemembered(site, credentials);
+            process.stderr.write(`已记住该站点账号（DPAPI 加密）：${f}\n`);
+          } catch (e) {
+            process.stderr.write(`记住账号失败（不影响本次运行）：${e.message}\n`);
+          }
+        }
+      } else if (process.stdin.isTTY && process.stdout.isTTY) {
+        // 3) 终端询问（人在终端里跑时）
+        credentials = await promptCredentials({
+          site,
+          needUser: need.user,
+          needPass: need.pass,
+        });
+      } else {
+        process.stderr.write(credentialsHint(site) + '\n');
+        process.exit(2);
+      }
+    } else {
       process.stderr.write(credentialsHint(site) + '\n');
       process.exit(2);
     }
-    credentials = await promptCredentials({ site, needUser: need.user, needPass: need.pass });
   }
 
   const secrets = [credentials?.user, credentials?.pass].filter(Boolean);
@@ -174,11 +234,22 @@ async function main() {
     transcript.push(`[${ok}] #${entry.index} ${entry.type}${pick(entry)} (${entry.ms}ms)`);
   };
 
-  const session = await openSession({
-    headless: !args.headed,
-    channel: args.channel || 'chrome',
-    timeout: args.timeout || 15000,
-  });
+  // ---- 浏览器：默认复用「一直开着」的共享浏览器（登录一次就不再问）----
+  // --ephemeral 回到零留痕模式：每次全新临时上下文，不落 Cookie。
+  const session = args.ephemeral
+    ? await openSession({
+        headless: !args.headed,
+        channel: args.channel || 'chrome',
+        timeout: args.timeout || 15000,
+        profile: args.profile ? path.resolve(args.profile) : null,
+      })
+    : await openSharedSession({
+        channel: args.channel || 'chrome',
+        timeout: args.timeout || 15000,
+        port: args.cdpPort || undefined,
+        profileDir: args.profile ? path.resolve(args.profile) : undefined,
+        targetHost: site,
+      });
 
   let results = [];
   let fatal = null;
@@ -206,7 +277,8 @@ async function main() {
     steps: results.length,
     failed: results.filter((r) => !r.ok).length,
     screenshots: results.filter((r) => r.file).length,
-    zeroRetention: true,
+    zeroRetention: !!args.ephemeral,
+    sessionMode: args.ephemeral ? 'ephemeral' : 'shared',
     note: '本文件不含网址、账号或密码原文；targetFingerprint 是站点主机的不可逆哈希。',
   };
   fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
