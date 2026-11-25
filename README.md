@@ -144,15 +144,21 @@ node src/cli.mjs auth forget app
 > ⚠️ **别用 `npm install browser-pilot`。** npm 上那个名字属于**另一个项目**（`svilupp/browser-pilot`，一个 CDP 自动化库）。本项目的包名是 `@dsai-q/browser-pilot`，仓库名是 browser-pilot。
 
 ```bash
-# 发布到 npm 之后：
-npm install @dsai-q/browser-pilot
+# ① 直接从 GitHub 安装（不需要 npm 账号，也不用等发包）——已实测可用
+npm install https://github.com/dsAI-Q/browser-pilot/archive/refs/heads/main.tar.gz
 
-# 现在（源码安装，推荐）
+# ② 源码安装（推荐用来开发）
 git clone https://github.com/dsAI-Q/browser-pilot.git
 cd browser-pilot
 npm install
 node src/cli.mjs --help
+
+# ③ 发布到 npm 之后
+npm install @dsai-q/browser-pilot
 ```
+
+> 用 `pnpm` 装上面那个 tarball 会因隔离存储解析不到依赖（`playwright-core`），
+> 要么用 npm 装，要么给 pnpm 加 `--node-linker=hoisted`。
 
 需要 Node ≥ 18，以及本机已安装 Chrome 或 Edge。
 **不会下载 Chromium**——`playwright-core` 复用系统浏览器（默认 `channel: 'chrome'`，可用 `--channel msedge`）。
