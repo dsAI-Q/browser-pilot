@@ -239,7 +239,7 @@ async function main() {
         );
         return 2;
       }
-      const session = await openAnySession(args, forHost, { interactive: true });
+      const session = await openAnySession(args, forHost);
       try {
         const all = await session.context.cookies();
         const cookies = forHost

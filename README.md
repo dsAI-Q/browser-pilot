@@ -148,6 +148,7 @@ node src/cli.mjs auth forget app
 ```bash
 # ① 直接从 GitHub 安装（不需要 npm 账号，也不用等发包）——已实测可用
 npm install https://github.com/dsAI-Q/browser-pilot/archive/refs/heads/main.tar.gz
+npx browser-pilot --help        # 装完用这个命令
 
 # ② 源码安装（推荐用来开发）
 git clone https://github.com/dsAI-Q/browser-pilot.git
