@@ -12,11 +12,14 @@
  *   --timeout <ms>      单步默认超时，默认 15000
  *   --creds-file <p>    从 JSON 文件读凭据 {user, pass}
  *   --creds-stdin       从标准输入读凭据 JSON
+ *   --no-prompt         缺少凭据时不要询问，直接报错（适合 CI）
  *   --no-audit          跳过留痕自检（不推荐，仅供调试）
  *
- * 凭据来源优先级：--creds-stdin > --creds-file > 环境变量 BP_USER / BP_PASS
+ * 凭据处理：
+ *   脚本里只有登录动作（login / valueFrom）时才需要凭据；
+ *   真的需要又没提供时，会自动在终端里询问（密码不回显），全程不落盘。
  *
- * 退出码：0 成功 / 1 有步骤失败 / 2 用法错误 / 3 留痕自检失败
+ * 退出码：0 成功 / 1 有步骤失败 / 2 用法或凭据错误 / 3 留痕自检失败
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,6 +28,12 @@ import { openSession } from './session.mjs';
 import { runSteps } from './actions.mjs';
 import { makeRedactor, hostFingerprint } from './redact.mjs';
 import { prepareOutputDir, auditNoLeak } from './policy.mjs';
+import {
+  needsCredentials,
+  collectNeeded,
+  promptCredentials,
+  credentialsHint,
+} from './prompt.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -40,6 +49,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--headed') out.headed = true;
     else if (a === '--creds-stdin') out.credsStdin = true;
+    else if (a === '--no-prompt') out.noPrompt = true;
     else if (a === '--no-audit') out.noAudit = true;
     else if (a === '--out') out.out = argv[++i];
     else if (a === '--channel') out.channel = argv[++i];
@@ -59,12 +69,19 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-function loadCredentials(args) {
-  // --creds-stdin 是异步读的，由 main 处理
-  if (args.credsStdin) return null;
-  if (args.credsFile) {
-    return readJsonFile(args.credsFile);
-  }
+/**
+ * 读 JSON 文件，自动剥掉 UTF-8 BOM。
+ * Windows 上 PowerShell 的 Set-Content -Encoding UTF8 默认会写 BOM，
+ * 不处理会导致 JSON.parse 直接报 "Unexpected token ''"。
+ */
+function readJsonFile(p) {
+  const raw = fs.readFileSync(path.resolve(p), 'utf8');
+  return JSON.parse(raw.replace(/^\uFEFF/, ''));
+}
+
+function loadCredentialsFromEnvOrFile(args) {
+  if (args.credsStdin) return null; // 由 main 异步读
+  if (args.credsFile) return readJsonFile(args.credsFile);
   const { BP_USER, BP_PASS } = process.env;
   if (BP_USER || BP_PASS) return { user: BP_USER, pass: BP_PASS };
   return null;
@@ -79,14 +96,12 @@ function stamp() {
   );
 }
 
-/**
- * 读 JSON 文件，自动剥掉 UTF-8 BOM。
- * Windows 上 PowerShell 的 Set-Content -Encoding UTF8 默认会写 BOM，
- * 不处理会导致 JSON.parse 直接报 "Unexpected token ''"。
- */
-function readJsonFile(p) {
-  const raw = fs.readFileSync(path.resolve(p), 'utf8');
-  return JSON.parse(raw.replace(/^\uFEFF/, ''));
+function siteLabel(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return '';
+  }
 }
 
 async function main() {
@@ -107,37 +122,56 @@ async function main() {
   }
 
   const script = readJsonFile(scriptPath);
+  const steps = script.steps || [];
 
-  // ---- 凭据 ----
-  let credentials = loadCredentials(args);
+  // ---- 收集本次出现过的网址（用于站点提示与泄漏自检）----
+  const urls = [script.url, ...steps.map((s) => s.url).filter(Boolean)].filter(Boolean);
+  const site = siteLabel(urls[0]);
+
+  // ---- 凭据：先看显式来源，再按需询问 ----
+  let credentials = loadCredentialsFromEnvOrFile(args);
   if (args.credsStdin) {
-    credentials = JSON.parse(await readStdin());
+    const raw = await readStdin();
+    if (raw.trim()) credentials = JSON.parse(raw.replace(/^\uFEFF/, ''));
   }
+
+  const need = collectNeeded(steps);
+  const wantsCreds = needsCredentials(steps);
+  const missing =
+    wantsCreds &&
+    (!credentials || (need.user && !credentials.user) || (need.pass && !credentials.pass));
+
+  if (missing) {
+    const interactive = process.stdin.isTTY && process.stdout.isTTY;
+    if (args.noPrompt || !interactive) {
+      process.stderr.write(credentialsHint(site) + '\n');
+      process.exit(2);
+    }
+    credentials = await promptCredentials({ site, needUser: need.user, needPass: need.pass });
+  }
+
   const secrets = [credentials?.user, credentials?.pass].filter(Boolean);
-
-  // ---- 收集本次出现过的网址，用于泄漏自检 ----
-  const urls = [
-    script.url,
-    ...(script.steps || []).map((s) => s.url).filter(Boolean),
-  ].filter(Boolean);
-
   const redact = makeRedactor(secrets);
 
   // ---- 输出目录 ----
-  const outDir = prepareOutputDir(
-    args.out || path.join(process.cwd(), '.bp-out', stamp())
-  );
+  const outDir = prepareOutputDir(args.out || path.join(process.cwd(), '.bp-out', stamp()));
 
   const transcript = [];
   const log = (entry) => {
     const ok = entry.ok ? 'OK ' : 'FAIL';
-    const extra =
-      entry.error ? `  ${entry.error}` :
-      entry.file ? `  ${entry.file}` :
-      entry.status !== undefined ? `  http ${entry.status}` :
-      entry.title ? `  ${entry.title}` :
-      entry.text ? `  ${String(entry.text).slice(0, 160).replace(/\s+/g, ' ')}` :
-      entry.count !== undefined ? `  ${entry.count}` : '';
+    const extra = entry.error
+      ? `  ${entry.error}`
+      : entry.file
+        ? `  ${entry.file}`
+        : entry.status !== undefined
+          ? `  http ${entry.status}`
+          : entry.title
+            ? `  ${entry.title}`
+            : entry.text
+              ? `  ${String(entry.text).slice(0, 160).replace(/\s+/g, ' ')}`
+              : entry.count !== undefined
+                ? `  ${entry.count}`
+                : '';
     transcript.push(`[${ok}] #${entry.index} ${entry.type}${extra} (${entry.ms}ms)`);
   };
 
@@ -150,12 +184,7 @@ async function main() {
   let results = [];
   let fatal = null;
   try {
-    results = await runSteps(session.page, script.steps || [], {
-      outDir,
-      redact,
-      credentials,
-      log,
-    });
+    results = await runSteps(session.page, steps, { outDir, redact, credentials, log });
   } catch (err) {
     fatal = redact(err?.message || String(err));
   } finally {
@@ -163,12 +192,12 @@ async function main() {
   }
 
   // ---- 落盘（全部脱敏）----
-  const targetUrl = urls[0];
   const manifest = {
     tool: 'browser-pilot',
-    version: '0.1.0',
+    version: '0.2.0',
     startedAt: new Date().toISOString(),
-    targetFingerprint: targetUrl ? hostFingerprint(targetUrl) : null,
+    targetFingerprint: urls[0] ? hostFingerprint(urls[0]) : null,
+    accountProvided: secrets.length > 0,
     steps: results.length,
     failed: results.filter((r) => !r.ok).length,
     screenshots: results.filter((r) => r.file).length,

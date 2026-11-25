@@ -35,11 +35,33 @@ cd browser-pilot && npm install
 需要 Node ≥ 18，以及本机已安装 Chrome 或 Edge。
 **不会下载 Chromium**——`playwright-core` 复用系统浏览器（`channel: 'chrome'`）。
 
-## 30 秒跑通
+## 30 秒跑通（会自己问你账号）
+
+只有两步：写个脚本，然后运行。
 
 ```bash
-# 1. 写一个脚本（里面没有任何密码）
-cat > my.json <<'JSON'
+browser-pilot run my.json
+```
+
+脚本里有登录动作时，它会直接问你：
+
+```
+────────────────────────────────────────────
+browser-pilot 需要登录凭据
+目标站点：example.com
+凭据只在内存中使用，不会写入磁盘，也不会出现在日志里。
+────────────────────────────────────────────
+账号（用户名／邮箱／手机号）：me@example.com
+密码（输入时不显示明文）：********
+```
+
+密码输入显示 `*` 号，不回显明文，也不进命令历史。
+
+**脚本不需要登录时，它一个字都不会问**——打开网页、截图、取文字、点击、滚动，全都不需要凭据，不会打断你。
+
+一个最小脚本长这样（里面没有任何密码）：
+
+```json
 {
   "steps": [
     { "type": "goto", "url": "https://example.com/login" },
@@ -49,15 +71,9 @@ cat > my.json <<'JSON'
     { "type": "text", "selector": "body" }
   ]
 }
-JSON
-
-# 2. 账号密码走环境变量，不进脚本
-set BP_USER=your-account      # Windows
-set BP_PASS=your-password
-browser-pilot run my.json
 ```
 
-输出：
+运行后的输出：
 
 ```
 [OK ] #0 goto  http 200 (812ms)
@@ -66,14 +82,22 @@ browser-pilot run my.json
 [OK ] #3 shot  after-login.png (298ms)
 [OK ] #4 text  Welcome back (12ms)
 输出目录：./.bp-out/20261125-181530
-⚠ 留痕自检：通过（输出目录内无网址与凭据原文）
+留痕自检：通过（输出目录内无网址与凭据原文）
 ```
 
-或者走自检：
+### 什么时候会问你要账号
+
+| 脚本里有 | 会问吗 |
+|---|---|
+| `{ "type": "login", ... }` | ✅ 问账号 + 密码 |
+| `{ "valueFrom": "user" }` / `{ "valueFrom": "pass" }` | ✅ 只问缺的那个 |
+| 只有 `goto` / `shot` / `text` / `click` / `fill`(字面值) / `scroll` | ❌ 一个字都不问 |
+
+### 跑测试
 
 ```bash
 npm run smoke
-# 9 项检查，含「整个输出目录无网址原文」
+# 17 项检查，含「只读脚本不会被要求输账号」和「需要登录时不卡住」
 ```
 
 ## 脚本格式
@@ -111,7 +135,28 @@ npm run smoke
 | `count` | 元素计数 | `selector` |
 | `scroll` | 滚动 | `y` |
 
-### 凭据的两种写法
+### 凭据怎么给
+
+**默认什么都不用准备**——脚本里写了登录动作，运行时它会问你。
+
+其余三种方式（优先级从高到低），适合脚本化、CI、或不想被询问的场景：
+
+```bash
+# 1) 管道传入（agent / 脚本调用推荐）
+echo '{"user":"me@example.com","pass":"..."}' | browser-pilot run my.json --creds-stdin
+
+# 2) 环境变量
+set BP_USER=me@example.com
+set BP_PASS=...
+browser-pilot run my.json
+
+# 3) 本地文件（自己控制，别提交进 Git）
+browser-pilot run my.json --creds-file C:\path\to\creds.json
+```
+
+非交互环境（CI、管道、被别的程序调用）里缺凭据时，**它不会偷偷弹窗卡住**，而是直接报错并列出这三种方式，退出码 2。
+
+脚本文件本身永远只写声明，不写密码：
 
 ```json
 // ❌ 不要这样：密码进了文件，会被提交进 Git
@@ -120,8 +165,6 @@ npm run smoke
 // ✅ 这样：文件里只有「从运行时凭据取」的声明
 { "type": "fill", "selector": "#pass", "valueFrom": "pass" }
 ```
-
-凭据来源优先级：`--creds-stdin` > `--creds-file` > 环境变量 `BP_USER` / `BP_PASS`。
 
 ## 输出
 

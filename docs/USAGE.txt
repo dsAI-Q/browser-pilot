@@ -1,6 +1,12 @@
 browser-pilot — 面向 agent 的受控浏览器操作工具（零留痕）
 
-用法：
+最简单用法（会自己问你账号）：
+  browser-pilot run 脚本.json
+
+  脚本里有登录动作时，它会在终端里问你账号和密码（密码输入显示 * 号，不回显）。
+  脚本只是打开页面、截图、取文字时，它一个字都不会问。
+
+其它用法：
   browser-pilot run <script.json> [选项]
 
 选项：
@@ -10,28 +16,31 @@ browser-pilot — 面向 agent 的受控浏览器操作工具（零留痕）
   --timeout <ms>      单步默认超时，默认 15000
   --creds-file <p>    从 JSON 文件读凭据 {user, pass}
   --creds-stdin       从标准输入读凭据 JSON
+  --no-prompt         缺少凭据时不要询问，直接报错（适合 CI）
   --no-audit          跳过留痕自检（不推荐，仅供调试）
 
-凭据来源优先级：
-  --creds-stdin  >  --creds-file  >  环境变量 BP_USER / BP_PASS
+何时会问你要账号：
+  只有脚本里出现下面任意一种才会问——
+    { "type": "login", ... }            登录动作
+    { "valueFrom": "user" }             填入账号
+    { "valueFrom": "pass" }             填入密码
+  其余情况（打开网页、截图、取文字、点击、滚动）完全不需要凭据，也不会打断你。
 
-凭据永远不写进脚本文件，脚本可以安全提交进 Git。
+凭据来源优先级：
+  --creds-stdin  >  --creds-file  >  环境变量 BP_USER / BP_PASS  >  终端询问
+
+  凭据永远不写进脚本文件，脚本可以安全提交进 Git。
 
 脚本格式（JSON）：
   {
-    "url": "https://example.com/login",          // 可选，首步可省
+    "url": "https://example.com/login",
     "steps": [
       { "type": "goto",  "url": "https://example.com/login" },
       { "type": "login", "userSelector": "#user", "passSelector": "#pass",
         "submitSelector": "button[type=submit]" },
       { "type": "wait",  "ms": 2000 },
       { "type": "shot",  "name": "01-after-login" },
-      { "type": "text",  "selector": "h1" },
-      { "type": "click", "text": "下一步" },
-      { "type": "fill",  "selector": "input[name=q]", "value": "hello" },
-      { "type": "fill",  "selector": "#password", "valueFrom": "pass" },
-      { "type": "press", "key": "Enter" },
-      { "type": "count", "selector": ".item" }
+      { "type": "text",  "selector": "h1" }
     ]
   }
 
@@ -40,10 +49,10 @@ browser-pilot — 面向 agent 的受控浏览器操作工具（零留痕）
 
 填充值的两种写法：
   "value"     —— 直接写字面值（不要放密码）
-  "valueFrom" —— "user" / "pass"，由运行时注入的凭据取值（推荐用于账号密码）
+  "valueFrom" —— "user" / "pass"，运行时从凭据取值（推荐用于账号密码）
 
 退出码：
-  0 成功 / 1 有步骤失败 / 2 用法错误 / 3 留痕自检失败
+  0 成功 / 1 有步骤失败 / 2 用法或凭据错误 / 3 留痕自检失败
 
 零留痕保证：
   · 只使用内存上下文（不落盘 History / Cookie / 登录态）
@@ -51,4 +60,6 @@ browser-pilot — 面向 agent 的受控浏览器操作工具（零留痕）
   · 输出文件里的网址一律替换为 <url>，凭据替换为 <cred>
   · 运行结束自动扫描输出目录，确认没有网址或凭据原文泄漏
 
-兼容性：脚本文件与凭据文件允许带 UTF-8 BOM（Windows 下 PowerShell 的 Set-Content -Encoding UTF8 默认会加 BOM，本工具会自动剥掉）。
+兼容性：
+  脚本文件与凭据文件允许带 UTF-8 BOM（Windows 下 PowerShell 的
+  Set-Content -Encoding UTF8 默认会加 BOM，本工具会自动剥掉）。
