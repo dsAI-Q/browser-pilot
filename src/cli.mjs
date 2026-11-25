@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 /**
  * browser-pilot CLI
  *
@@ -157,22 +157,21 @@ async function main() {
   const outDir = prepareOutputDir(args.out || path.join(process.cwd(), '.bp-out', stamp()));
 
   const transcript = [];
+  const pick = (entry) => {
+    if (entry.error) return `  ${entry.error}`;
+    if (entry.file) return `  ${entry.file}`;
+    if (entry.status !== undefined) return `  http ${entry.status}`;
+    if (entry.neterrors) return `  ${entry.neterrors}`;
+    if (entry.frames) return `  frames=${entry.frames}`;
+    if (entry.urlHost) return `  host=${entry.urlHost}`;
+    if (entry.title) return `  ${entry.title}`;
+    if (entry.text) return `  ${String(entry.text).slice(0, 160).replace(/\s+/g, ' ')}`;
+    if (entry.count !== undefined) return `  ${entry.count}`;
+    return '';
+  };
   const log = (entry) => {
     const ok = entry.ok ? 'OK ' : 'FAIL';
-    const extra = entry.error
-      ? `  ${entry.error}`
-      : entry.file
-        ? `  ${entry.file}`
-        : entry.status !== undefined
-          ? `  http ${entry.status}`
-          : entry.title
-            ? `  ${entry.title}`
-            : entry.text
-              ? `  ${String(entry.text).slice(0, 160).replace(/\s+/g, ' ')}`
-              : entry.count !== undefined
-                ? `  ${entry.count}`
-                : '';
-    transcript.push(`[${ok}] #${entry.index} ${entry.type}${extra} (${entry.ms}ms)`);
+    transcript.push(`[${ok}] #${entry.index} ${entry.type}${pick(entry)} (${entry.ms}ms)`);
   };
 
   const session = await openSession({
@@ -184,7 +183,13 @@ async function main() {
   let results = [];
   let fatal = null;
   try {
-    results = await runSteps(session.page, steps, { outDir, redact, credentials, log });
+    results = await runSteps(session.page, steps, {
+      outDir,
+      redact,
+      credentials,
+      netErrors: session.netErrors,
+      log,
+    });
   } catch (err) {
     fatal = redact(err?.message || String(err));
   } finally {

@@ -50,7 +50,30 @@ export async function openSession(opts = {}) {
   context.setDefaultNavigationTimeout(timeout);
   const page = await context.newPage();
 
+  // 记录失败的请求：页面空白最常见的原因就是某个子框架/资源 404 或被拦，
+  // 只有拿到「哪个主机 + 什么错」才诊断得下去。只保留主机名，不留完整网址。
+  const netErrors = [];
+  const record = (request) => {
+    let host = '';
+    try {
+      host = new URL(request.url()).host;
+    } catch {
+      host = 'invalid';
+    }
+    const failure = request.failure();
+    netErrors.push({
+      host,
+      method: request.method(),
+      resource: request.resourceType(),
+      error: failure ? String(failure.errorText).slice(0, 120) : 'unknown',
+    });
+  };
+  page.on('requestfailed', record);
+
   async function close() {
+    try {
+      page.off('requestfailed', record);
+    } catch {}
     try {
       await context.close();
     } catch {}
@@ -59,5 +82,5 @@ export async function openSession(opts = {}) {
     } catch {}
   }
 
-  return { browser, context, page, close };
+  return { browser, context, page, close, netErrors };
 }

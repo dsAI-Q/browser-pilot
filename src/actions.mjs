@@ -148,6 +148,48 @@ export async function runSteps(page, steps, ctx) {
           break;
         }
 
+        case 'url': {
+          // 用于判断是否被重定向到登录页或其他站点
+          entry.url = ctx.redact(page.url());
+          break;
+        }
+
+        case 'neterrors': {
+          // 报告加载失败的请求（主机 + 类型 + 错误），页面空白时先看这个
+          const list = ctx.netErrors || [];
+          const max = Number(step.max || 12);
+          entry.neterrors = list.length
+            ? list.slice(0, max).map((e) => `${e.host} ${e.resource} ${e.error}`).join(' ; ') +
+              (list.length > max ? ` ; …共 ${list.length} 条` : '')
+            : 'none';
+          break;
+        }
+
+        case 'frames': {
+          // 列出所有框架（含主框架）的主机名，用于判断内容是否在 iframe 里、是否跨域
+          const list = page.frames().map((f, i) => {
+            let host = '';
+            try {
+              host = new URL(f.url()).host;
+            } catch {
+              host = f.url() ? f.url().slice(0, 16) : 'about:blank';
+            }
+            return `${i}:${host || 'same-origin'}`;
+          });
+          entry.frames = list.join(' | ');
+          break;
+        }
+
+        case 'urlhost': {
+          // 只返回主机名：足够判断是否跨站跳转，又不暴露带 token / 工程 id 的完整路径
+          try {
+            entry.urlHost = new URL(page.url()).host;
+          } catch {
+            entry.urlHost = 'invalid';
+          }
+          break;
+        }
+
         case 'count': {
           if (!step.selector) throw new Error('count 缺少 selector');
           entry.count = await page.locator(step.selector).count();
