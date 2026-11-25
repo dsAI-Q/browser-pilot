@@ -1,0 +1,33 @@
+{
+  "name": "browser-pilot",
+  "version": "0.1.0",
+  "description": "Agent-friendly controlled browser automation. Zero retention by default: never writes URLs or credentials to disk.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "browser-pilot": "src/cli.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "src",
+    "docs",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "smoke": "node test/smoke.mjs"
+  },
+  "keywords": [
+    "playwright",
+    "browser-automation",
+    "agent",
+    "privacy",
+    "zero-retention"
+  ],
+  "dependencies": {
+    "playwright-core": "^1.48.0"
+  }
+}

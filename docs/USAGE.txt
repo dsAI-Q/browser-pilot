@@ -1,0 +1,52 @@
+browser-pilot — 面向 agent 的受控浏览器操作工具（零留痕）
+
+用法：
+  browser-pilot run <script.json> [选项]
+
+选项：
+  --out <dir>         输出目录（默认 ./.bp-out/<时间戳>）
+  --headed            显示浏览器窗口（默认无头）
+  --channel <name>    chrome（默认）| msedge
+  --timeout <ms>      单步默认超时，默认 15000
+  --creds-file <p>    从 JSON 文件读凭据 {user, pass}
+  --creds-stdin       从标准输入读凭据 JSON
+  --no-audit          跳过留痕自检（不推荐，仅供调试）
+
+凭据来源优先级：
+  --creds-stdin  >  --creds-file  >  环境变量 BP_USER / BP_PASS
+
+凭据永远不写进脚本文件，脚本可以安全提交进 Git。
+
+脚本格式（JSON）：
+  {
+    "url": "https://example.com/login",          // 可选，首步可省
+    "steps": [
+      { "type": "goto",  "url": "https://example.com/login" },
+      { "type": "login", "userSelector": "#user", "passSelector": "#pass",
+        "submitSelector": "button[type=submit]" },
+      { "type": "wait",  "ms": 2000 },
+      { "type": "shot",  "name": "01-after-login" },
+      { "type": "text",  "selector": "h1" },
+      { "type": "click", "text": "下一步" },
+      { "type": "fill",  "selector": "input[name=q]", "value": "hello" },
+      { "type": "fill",  "selector": "#password", "valueFrom": "pass" },
+      { "type": "press", "key": "Enter" },
+      { "type": "count", "selector": ".item" }
+    ]
+  }
+
+支持的动作类型：
+  goto | wait | shot | click | fill | press | login | text | title | count | scroll
+
+填充值的两种写法：
+  "value"     —— 直接写字面值（不要放密码）
+  "valueFrom" —— "user" / "pass"，由运行时注入的凭据取值（推荐用于账号密码）
+
+退出码：
+  0 成功 / 1 有步骤失败 / 2 用法错误 / 3 留痕自检失败
+
+零留痕保证：
+  · 只使用内存上下文（不落盘 History / Cookie / 登录态）
+  · 禁止 recordHar / recordVideo / storageState
+  · 输出文件里的网址一律替换为 <url>，凭据替换为 <cred>
+  · 运行结束自动扫描输出目录，确认没有网址或凭据原文泄漏

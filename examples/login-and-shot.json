@@ -1,0 +1,17 @@
+{
+  "comment": "示例脚本：登录后截图并读取标题。账号密码不在本文件里，由运行时注入（BP_USER / BP_PASS 或 --creds-file / --creds-stdin）。",
+  "url": "https://example.com/login",
+  "steps": [
+    { "type": "goto", "url": "https://example.com/login" },
+    { "type": "wait", "selector": "input", "state": "visible" },
+    { "type": "shot", "name": "01-login-page" },
+
+    { "type": "login", "userSelector": "#username", "passSelector": "#password", "submitSelector": "button[type=submit]" },
+    { "type": "wait", "ms": 3000 },
+    { "type": "shot", "name": "02-after-login" },
+
+    { "type": "title" },
+    { "type": "text", "selector": "body", "max": 800 },
+    { "type": "shot", "name": "03-page", "fullPage": true }
+  ]
+}
