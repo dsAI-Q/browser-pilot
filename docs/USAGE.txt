@@ -1,4 +1,4 @@
-browser-pilot-dsai — 面向 agent 的受控浏览器操作工具
+browser-pilot — 面向 agent 的受控浏览器操作工具（npm 包名 @dsai-q/browser-pilot）
 
 最简用法（不需要任何账号）：
   node src/cli.mjs run examples/open-and-shot.json

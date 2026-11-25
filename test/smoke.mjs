@@ -113,8 +113,10 @@ let pkg = null;
 try { pkg = JSON.parse(pkgRaw); } catch {}
 check('package.json 能被 JSON.parse', pkg !== null);
 check('版本号常量与 package.json 一致', pkg && pkg.version === VERSION, `${pkg && pkg.version} vs ${VERSION}`);
-check('包名是 browser-pilot-dsai', pkg && pkg.name === 'browser-pilot-dsai', pkg && pkg.name);
-check('包名全小写（npm 新包规则）', pkg && pkg.name === pkg.name.toLowerCase());
+check('包名是 @dsai-q/browser-pilot', pkg && pkg.name === '@dsai-q/browser-pilot', pkg && pkg.name);
+check('包名符合 npm 规则（可带作用域，其余全小写）',
+  !!pkg && /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(pkg.name),
+  pkg && pkg.name);
 
 // ref 解析：能取到选择器，取不到要报错而不是静默
 const refMap = { 'ref:e1': '#login', 'ref:e2': 'button.submit' };

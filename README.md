@@ -1,9 +1,9 @@
-# browser-pilot-dsAi
+# browser-pilot
 
 **Agent-friendly browser control.** 附着你正在用的 Chrome、把页面扫成 `ref:e3` 这种可点引用、每个动作都能断言结果；只有站点真的需要账号时才打扰你。
 
-> 包名：`browser-pilot-dsai`（npm 新包名不允许大写，所以是 dsai）。
-> ⚠️ npm 上的 `browser-pilot` 是**另一个项目**（svilupp/browser-pilot），别装错。
+> 包名：`@dsai-q/browser-pilot`
+> ⚠️ npm 上的裸名 `browser-pilot` 是**另一个项目**（svilupp/browser-pilot），别装错。
 
 ---
 
@@ -131,9 +131,13 @@ node src/cli.mjs auth forget app
 
 ## 安装
 
-> ⚠️ **别用 `npm install browser-pilot`。** npm 上那个名字属于**另一个项目**（`svilupp/browser-pilot`，一个 CDP 自动化库）。本项目的包名是 `browser-pilot-dsai`（npm 新包名不允许大写，所以是 dsai；仓库仍叫 browser-pilot），目前只从源码安装。
+> ⚠️ **别用 `npm install browser-pilot`。** npm 上那个名字属于**另一个项目**（`svilupp/browser-pilot`，一个 CDP 自动化库）。本项目的包名是 `@dsai-q/browser-pilot`，仓库名是 browser-pilot。
 
 ```bash
+# 发布到 npm 之后：
+npm install @dsai-q/browser-pilot
+
+# 现在（源码安装，推荐）
 git clone https://github.com/dsAI-Q/browser-pilot.git
 cd browser-pilot
 npm install

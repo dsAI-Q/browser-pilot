@@ -1,6 +1,6 @@
 {
-  "name": "browser-pilot-dsai",
-  "version": "0.5.0",
+  "name": "@dsai-q/browser-pilot",
+  "version": "0.5.1",
   "description": "Agent-friendly browser control for DSH: attach to the Chrome you are already using, snapshot pages into ref handles, assert outcomes, and only touch credentials when a site really needs them. Opt-in zero-retention mode.",
   "type": "module",
   "license": "MIT",

@@ -392,7 +392,7 @@ async function main() {
 
   // ---- 落盘（全部脱敏）----
   const manifest = {
-    tool: 'browser-pilot-dsai',
+    tool: 'browser-pilot',
     version: VERSION,
     startedAt: new Date().toISOString(),
     targetFingerprint: urls[0] ? hostFingerprint(urls[0]) : null,
