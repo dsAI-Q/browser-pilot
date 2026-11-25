@@ -1,11 +1,17 @@
 /**
- * 零留痕策略：这里是整个工具的红线。
+ * 零留痕策略：这是 --ephemeral 模式的红线（默认的共享浏览器模式另有说明）。
  *
- * 三条硬规则：
- *   1. 只用内存上下文（browser.newContext），绝不使用 launchPersistentContext —
- *      持久化 profile 会把浏览历史、Cookie、账号写进磁盘。
+ * 两种模式的区别：
+ *   - 默认「共享浏览器」（src/shared.mjs）：登录态留在调用方指定的配置目录里，
+ *     目的是「登录一次、之后不再问」。它有意保留 Cookie，所以不在这里的管辖范围。
+ *   - --ephemeral：本文件负责的严格模式 —— 只用内存上下文，用完即焚。
+ *
+ * --ephemeral 下的三条硬规则：
+ *   1. 只用内存上下文（browser.newContext），绝不使用 launchPersistentContext。
  *   2. 禁止 recordHar / recordVideo / storageState 落盘。
  *   3. 运行结束后自检：输出目录里不得出现任何网址或凭据原文。
+ *
+ * 两种模式共同遵守的只有第 2 条和第 3 条（输出侧永远脱敏、永远自检）。
  */
 import fs from 'node:fs';
 import path from 'node:path';

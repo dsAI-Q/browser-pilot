@@ -9,9 +9,23 @@
  *   4. 无论哪条路径，凭据只在内存里，绝不落盘。
  */
 
+/**
+ * 把「账号|密码」这种一行写法拆成 {user, pass}。
+ * 允许的分隔符：| ｜ :: Tab ， , —— 取最先出现的那个。
+ * 账号里不会出现这些字符；密码只按第一个分隔符切，后面的原样保留。
+ * @returns {{user:string, pass:string}|null}
+ */
+export function parsePair(raw) {
+  const s = String(raw ?? '');
+  for (const d of ['|', '｜', '::', '\t', '，', ',']) {
+    const i = s.indexOf(d);
+    if (i > 0) return { user: s.slice(0, i).trim(), pass: s.slice(i + d.length) };
+  }
+  return null;
+}
+
 /** 脚本是否需要凭据 */
-export function needsCredentials(steps = []) {
-  return steps.some(
+export function needsCredentials(steps = []) {  return steps.some(
     (s) =>
       s &&
       (String(s.type || '').toLowerCase() === 'login' || typeof s.valueFrom === 'string')

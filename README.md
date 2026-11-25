@@ -35,15 +35,17 @@
 
 ## 安装
 
+> ⚠️ **别用 `npm install browser-pilot`。** npm 上这个包名属于**另一个项目**（`svilupp/browser-pilot`，一个 CDP 自动化库），装到的不是这个工具。本项目目前只从源码安装。
+
 ```bash
-npm install browser-pilot
-# 或从源码
 git clone https://github.com/dsAI-Q/browser-pilot.git
-cd browser-pilot && npm install
+cd browser-pilot
+npm install
+node src/cli.mjs --help
 ```
 
 需要 Node ≥ 18，以及本机已安装 Chrome 或 Edge。
-**不会下载 Chromium**——`playwright-core` 复用系统浏览器（`channel: 'chrome'`）。
+**不会下载 Chromium**——`playwright-core` 复用系统浏览器（默认 `channel: 'chrome'`，可用 `--channel msedge`）。
 
 ## 30 秒跑通
 
@@ -116,8 +118,14 @@ browser-pilot run my.json
 
 ```bash
 npm run smoke
-# 17 项检查，含「只读脚本不会被要求输账号」和「需要登录时不卡住」
+# A 组：凭据门控、一行式凭据解析、脱敏器、站点指纹、策略拒绝
+# B 组：--help 可用、互斥选项被拒
+# C 组：--ephemeral 跑一遍只读脚本，输出里找不到那个 URL
+# D 组：需要登录但没凭据时不挂死（退出码 2）
 ```
+
+沙箱或受限 CI 里禁止创建浏览器进程时，C 组会打印 `SKIP` 而不是 `FAIL`；
+想让它必须跑起来（真机 CI），加 `BP_SMOKE_REQUIRE_BROWSER=1`。
 
 ## 脚本格式
 
@@ -225,22 +233,36 @@ browser-pilot run my.json --creds-file C:\path\to\creds.json
 ```json
 {
   "tool": "browser-pilot",
+  "version": "0.4.1",
   "targetFingerprint": "h_3f9a1c2e",
   "steps": 5,
   "failed": 0,
   "screenshots": 2,
-  "zeroRetention": true
+  "zeroRetention": false,
+  "sessionMode": "shared"
 }
 ```
 
 `targetFingerprint` 是站点主机的 SHA-256 前 8 位——**能区分「跑了哪个站」，但无法反推出网址**。
 
+`zeroRetention` 反映本次是不是 `--ephemeral`；`sessionMode` 是 `shared` 或 `ephemeral`。
+
 ## 它不做什么（重要）
 
-- ❌ **不接管你已经登录的浏览器**。那需要持久化 profile，与零留痕冲突。想复用登录态请退出本工具的使用场景。
-- ❌ 不后台常驻、不注册开机启动、不监听端口
+- ❌ **不接管你日常那个 Chrome**。Chrome 136+ 禁止对默认配置目录开调试端口，所以它用自己维护的窗口；登录一次之后复用，你不用重复登录
+- ❌ 不在后台常驻、不注册开机启动（窗口关了，下次运行自动重开）
 - ❌ 不上传任何数据，不收集遥测
 - ❌ 不读你系统里其他浏览器的数据
+
+**它会留下什么（说清楚）：**
+
+| 位置 | 内容 | 什么时候有 |
+|---|---|---|
+| `%LOCALAPPDATA%\browser-pilot\profile` | 浏览器登录态（Cookie 等） | 默认模式下第一次运行后 |
+| `%LOCALAPPDATA%\browser-pilot\creds.json` | 你勾了「长期保留」的账号密码，**DPAPI 密文** | 只有你勾选过 |
+| `./.bp-out/<时间戳>/` | 截图、steps.json、manifest.json（网址已脱敏） | 每次运行 |
+
+两个 `%LOCALAPPDATA%` 目录随时可以整个删掉；`--ephemeral` 模式两者都不用。
 
 ## 使用者的责任
 
@@ -258,7 +280,11 @@ npm run smoke
 ```
 
 测试用一个 `data:` URL 跑完整流程，然后断言：**输出目录里找不到那个 URL**。
-不需要任何账号，可在 CI 直接跑。
+不需要任何账号，可在 CI 直接跑。自动化路径一律带 `--no-gui --no-prompt`，不会弹窗、不会等人。
+
+**验证记录**：0.4.1 在干净目录（重新 `pnpm install` 后）整包跑过，27 项通过；
+2 项浏览器断言在禁止创建子进程的沙箱里标记为 `SKIP`。
+浏览器路径另行通过真实任务验证——在一个真实网站的编辑器里定位图层、改文字、重载核对，全程退出码 0。
 
 ## License
 

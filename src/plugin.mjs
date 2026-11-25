@@ -33,7 +33,7 @@ function clip(text, max = MAX_OUT) {
 /**
  * 跑一次 CLI。凭据从环境变量取，经 stdin 传入，绝不写进命令行参数。
  */
-function runCli(args, { timeoutMs = 300000 } = {}) {
+function runCli(args, { timeoutMs = 900000 } = {}) {
   return new Promise((resolve) => {
     const child = execFile(
       process.execPath,
@@ -103,9 +103,14 @@ export function apply(ctx, config = {}) {
             description:
               'Zero-retention mode: a fresh throwaway context with no cookies or history on disk. Off by default, because it cannot reuse an existing sign-in.',
           },
+          noGui: {
+            type: 'boolean',
+            description:
+              'Never open the credential dialog. Use in unattended runs: a script that needs credentials then fails fast instead of waiting for a human.',
+          },
         },
         output,
-        async execute({ scriptPath, outDir, headed, profile, ephemeral }) {
+        async execute({ scriptPath, outDir, headed, profile, ephemeral, noGui }) {
           if (!scriptPath) return 'Missing scriptPath.'
           const args = ['run', path.resolve(workDir, scriptPath)]
           if (outDir) args.push('--out', path.resolve(workDir, outDir))
@@ -114,7 +119,8 @@ export function apply(ctx, config = {}) {
           if (ephemeral) args.push('--ephemeral')
           args.push('--channel', channel, '--timeout', String(timeout))
           if (process.env.BP_CREDS || process.env.DSH_SECRET_BP_CREDS || process.env.BP_USER || process.env.BP_PASS || process.env.DSH_SECRET_BP_USER || process.env.DSH_SECRET_BP_PASS) args.push('--creds-stdin')
-          else args.push('--no-prompt')
+          else if (noGui) args.push('--no-gui', '--no-prompt')
+          // 否则不传任何提示相关开关：让它弹图形弹窗问用户（这是 agent 场景下的正确做法）
 
           const r = await runCli(args)
           const body = [r.stdout.trim(), r.stderr.trim()].filter(Boolean).join('\n')

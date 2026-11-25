@@ -21,8 +21,14 @@ import { DEFAULT_VIEWPORT } from './session.mjs'
 const DEFAULT_PORT = Number(process.env.BP_CDP_PORT || 9222)
 
 function defaultProfileDir() {
+  if (process.platform === 'win32') {
+    const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
+    return path.join(base, 'browser-pilot', 'profile')
+  }
   const base =
-    process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
+    process.platform === 'darwin'
+      ? path.join(os.homedir(), 'Library', 'Application Support')
+      : process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share')
   return path.join(base, 'browser-pilot', 'profile')
 }
 
@@ -34,10 +40,17 @@ function chromeCandidates(channel) {
     path.join(pf, 'Google\\Chrome\\Application\\chrome.exe'),
     path.join(pf86, 'Google\\Chrome\\Application\\chrome.exe'),
     path.join(local, 'Google\\Chrome\\Application\\chrome.exe'),
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
   ]
   const edge = [
     path.join(pf, 'Microsoft\\Edge\\Application\\msedge.exe'),
     path.join(pf86, 'Microsoft\\Edge\\Application\\msedge.exe'),
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/usr/bin/microsoft-edge',
   ]
   return channel === 'msedge' ? [...edge, ...chrome] : [...chrome, ...edge]
 }
@@ -87,21 +100,18 @@ function launchChrome({ exe, port, profileDir }) {
   return child.pid
 }
 
-/** 目标页复用：同主机名的标签页优先 */
+/** 目标页复用：只复用同主机名的标签页；绝不接管别人的标签 */
 function pickPage(context, host) {
-  const pages = context.pages()
-  if (!pages.length) return null
-  if (host) {
-    const hit = pages.find((p) => {
-      try {
-        return new URL(p.url()).host === host
-      } catch {
-        return false
-      }
-    })
-    if (hit) return hit
-  }
-  return pages[0]
+  if (!host) return null;
+  const pages = context.pages();
+  const hit = pages.find((p) => {
+    try {
+      return new URL(p.url()).host === host;
+    } catch {
+      return false;
+    }
+  });
+  return hit || null;
 }
 
 /**
@@ -131,7 +141,15 @@ export async function openSharedSession(opts = {}) {
     }
   }
 
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`)
+  let browser;
+  try {
+    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+  } catch (err) {
+    throw new Error(
+      `连不上共享浏览器（端口 ${port}）。可能是该端口被别的程序占用，` +
+        `用 --cdp-port 换一个端口重试。原始错误：${err.message}`
+    );
+  }
   const context = browser.contexts()[0] || (await browser.newContext({ viewport: DEFAULT_VIEWPORT }))
   context.setDefaultTimeout(timeout)
   context.setDefaultNavigationTimeout(timeout)

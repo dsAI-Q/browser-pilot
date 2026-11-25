@@ -33,14 +33,24 @@ import {
   collectNeeded,
   promptCredentials,
   credentialsHint,
+  parsePair,
 } from './prompt.mjs';
 import { loadRemembered, saveRemembered } from './creds.mjs';
 import { openSharedSession } from './shared.mjs';
+import { VERSION } from './version.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 function usage(code = 0) {
-  const text = fs.readFileSync(path.join(HERE, '..', 'docs', 'USAGE.txt'), 'utf8');
+  let text = '';
+  try {
+    text = fs.readFileSync(path.join(HERE, '..', 'docs', 'USAGE.txt'), 'utf8');
+  } catch {
+    text =
+      'browser-pilot run <script.json> [--out <dir>] [--ephemeral] [--cdp-port <n>]\n' +
+      '            [--creds-stdin] [--no-gui] [--no-prompt] [--channel chrome|msedge]\n' +
+      '（未找到 docs/USAGE.txt，这是精简帮助）\n';
+  }
   process.stdout.write(text);
   process.exit(code);
 }
@@ -85,20 +95,6 @@ function readJsonFile(p) {
   return JSON.parse(raw.replace(/^\uFEFF/, ''));
 }
 
-/**
- * 把「账号|密码」这种一行写法拆成 {user, pass}。
- * 允许的分隔符：| ｜ :: Tab ， , —— 取最先出现的那个。
- * 账号里不会出现这些字符，密码只按第一个分隔符切，后面的原样保留。
- */
-function parsePair(raw) {
-  const s = String(raw ?? '');
-  for (const d of ['|', '｜', '::', '\t', '，', ',']) {
-    const i = s.indexOf(d);
-    if (i > 0) return { user: s.slice(0, i).trim(), pass: s.slice(i + d.length) };
-  }
-  return null;
-}
-
 function loadCredentialsFromEnvOrFile(args) {
   if (args.credsStdin) return null; // 由 main 异步读
   if (args.credsFile) return readJsonFile(args.credsFile);
@@ -139,6 +135,12 @@ async function main() {
   }
 
   const args = parseArgs(argv.slice(1));
+  if (args.ephemeral && args.profile) {
+    process.stderr.write(
+      '--ephemeral（零留痕）和 --profile（保留登录态）是互斥的：前者不落任何状态，后者就是要落。请二选一。\n'
+    );
+    process.exit(2);
+  }
   const scriptPath = args._[0];
   if (!scriptPath) {
     process.stderr.write('缺少脚本文件路径\n');
@@ -183,7 +185,10 @@ async function main() {
     } else if (!args.noPrompt) {
       // 2) 图形弹框（带「长期保留」勾选）——agent 也能用，因为不依赖终端
       const got = args.noGui ? null : askViaGui(site);
-      if (got) {
+      if (got && got.cancelled) {
+        process.stderr.write('已取消登录，未执行。\n');
+        process.exit(130);
+      } else if (got) {
         credentials = { user: got.user, pass: got.pass };
         if (got.remember) {
           try {
@@ -241,7 +246,6 @@ async function main() {
         headless: !args.headed,
         channel: args.channel || 'chrome',
         timeout: args.timeout || 15000,
-        profile: args.profile ? path.resolve(args.profile) : null,
       })
     : await openSharedSession({
         channel: args.channel || 'chrome',
@@ -270,7 +274,7 @@ async function main() {
   // ---- 落盘（全部脱敏）----
   const manifest = {
     tool: 'browser-pilot',
-    version: '0.2.0',
+    version: VERSION,
     startedAt: new Date().toISOString(),
     targetFingerprint: urls[0] ? hostFingerprint(urls[0]) : null,
     accountProvided: secrets.length > 0,

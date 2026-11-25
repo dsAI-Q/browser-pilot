@@ -20,7 +20,14 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const GUI_PS1 = path.join(HERE, 'gui-prompt.ps1')
 
 function storeDir() {
-  const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
+  if (process.platform === 'win32') {
+    const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
+    return path.join(base, 'browser-pilot')
+  }
+  const base =
+    process.platform === 'darwin'
+      ? path.join(os.homedir(), 'Library', 'Application Support')
+      : process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share')
   return path.join(base, 'browser-pilot')
 }
 
@@ -106,11 +113,14 @@ export function forgetRemembered(site) {
 
 /**
  * 图形弹框问账号密码，带「长期保留」勾选。
- * @returns {{user:string, pass:string, remember:boolean}|null} 用户取消时返回 null
+ * @returns {{user:string, pass:string, remember:boolean}
+ *          | {cancelled:true}
+ *          | null}  null = 弹不出来（非 Windows / 无桌面），cancelled = 用户点了取消
  */
 export function askViaGui(site) {
   if (process.platform !== 'win32') return null
   let out = ''
+  let code = 0
   try {
     out = execFileSync(
       'powershell.exe',
@@ -124,17 +134,20 @@ export function askViaGui(site) {
         '-Site',
         String(site || 'this site'),
       ],
-      { encoding: 'utf8', timeout: 300000, windowsHide: true }
+      { encoding: 'utf8', timeout: 180000, windowsHide: true }
     )
   } catch (err) {
-    // 退出码 3 = 用户取消
+    code = typeof err.status === 'number' ? err.status : 1
     out = String(err.stdout || '')
-    if (out && /cancelled/.test(out)) return null
-    return null
+    // 退出码 3 = 用户取消；其他（powershell 起不来、无桌面）= 弹不出来
+    if (code === 3) return { cancelled: true }
+    if (!out) return null
   }
+  if (code !== 0 && !out) return null
   try {
     const obj = JSON.parse(out.trim() || '{}')
-    if (obj.cancelled || !obj.user || !obj.pass) return null
+    if (obj.cancelled) return { cancelled: true }
+    if (!obj.user || !obj.pass) return { cancelled: true }
     return { user: obj.user, pass: obj.pass, remember: !!obj.remember }
   } catch {
     return null
