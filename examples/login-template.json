@@ -1,8 +1,8 @@
 {
-  "comment": "示例：需要登录的脚本。账号密码不在本文件里——运行时它会在终端里问你，密码输入显示 * 号。",
-  "url": "https://example.com/login",
+  "comment": "登录模板：把 url / 选择器换成你要的站点即可。账号密码不写在这个文件里——运行时它会弹窗问你（可勾选长期保留），或从 BP_CREDS / --creds-stdin 传入。",
+  "url": "https://YOUR-SITE.example/login",
   "steps": [
-    { "type": "goto", "url": "https://example.com/login" },
+    { "type": "goto", "url": "https://YOUR-SITE.example/login" },
     { "type": "wait", "selector": "input", "state": "visible" },
     { "type": "shot", "name": "01-login-page" },
 

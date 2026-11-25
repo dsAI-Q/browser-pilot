@@ -1,0 +1,10 @@
+{
+  "comment": "第一个例子：不需要任何账号。直接 node src/cli.mjs run examples/open-and-shot.json 就能跑通（第一次会自动开一个浏览器窗口）。",
+  "url": "https://example.com/",
+  "steps": [
+    { "type": "goto", "url": "https://example.com/" },
+    { "type": "title" },
+    { "type": "text", "selector": "body", "max": 300 },
+    { "type": "shot", "name": "01-page" }
+  ]
+}

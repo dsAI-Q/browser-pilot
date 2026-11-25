@@ -22,7 +22,9 @@ export const DEFAULT_VIEWPORT = { width: 1440, height: 900 };
  * @param {string}  [opts.channel='chrome'] 复用系统已装的 Chrome，不下载 Chromium
  * @param {object}  [opts.viewport]
  * @param {number}  [opts.timeout=15000]
- * @param {string}  [opts.profile] 持久化配置目录（opt-in，登录态会留在该目录）
+ *
+ * 注意：本函数只做「用完即焚」的临时会话（--ephemeral）。
+ * 需要复用登录态的共享浏览器在 src/shared.mjs，那边才用持久化配置目录。
  */
 export async function openSession(opts = {}) {
   const {
@@ -30,7 +32,6 @@ export async function openSession(opts = {}) {
     channel = 'chrome',
     viewport = DEFAULT_VIEWPORT,
     timeout = 15000,
-    profile = null,
   } = opts;
 
   const contextOptions = {
@@ -47,33 +48,16 @@ export async function openSession(opts = {}) {
   let context;
   let page;
 
-  if (profile) {
-    // opt-in：登录态存在调用方指定的目录里
-    try {
-      context = await chromium.launchPersistentContext(profile, {
-        ...contextOptions,
-        channel,
-        headless,
-      });
-    } catch (err) {
-      throw new Error(
-        `启动浏览器失败（channel=${channel}, profile=${profile}）。原始错误：${err.message}`
-      );
-    }
-    browser = context.browser();
-    page = context.pages()[0] || (await context.newPage());
-  } else {
-    try {
-      browser = await chromium.launch({ channel, headless });
-    } catch (err) {
-      throw new Error(
-        `启动浏览器失败（channel=${channel}）。请确认系统已装 Chrome，` +
-          `或用 --channel msedge 改用 Edge。原始错误：${err.message}`
-      );
-    }
-    context = await browser.newContext(contextOptions);
-    page = await context.newPage();
+  try {
+    browser = await chromium.launch({ channel, headless });
+  } catch (err) {
+    throw new Error(
+      `启动浏览器失败（channel=${channel}）。请确认系统已装 Chrome，` +
+        `或用 --channel msedge 改用 Edge。原始错误：${err.message}`
+    );
   }
+  context = await browser.newContext(contextOptions);
+  page = await context.newPage();
 
   context.setDefaultTimeout(timeout);
   context.setDefaultNavigationTimeout(timeout);
