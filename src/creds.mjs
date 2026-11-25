@@ -35,19 +35,38 @@ function storeFile() {
   return path.join(storeDir(), 'creds.json')
 }
 
+/** 登录态快照目录（auth.mjs 用） */
+export function authDir() {
+  return path.join(storeDir(), 'auth')
+}
+
 function key(site) {
   return String(site || 'unknown').toLowerCase()
 }
 
 function ps(command, input) {
-  return execFileSync(
-    'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
-    { input, encoding: 'utf8', timeout: 20000, windowsHide: true }
-  )
+  if (process.platform !== 'win32') {
+    throw new Error(`DPAPI 加密只在 Windows 上可用（当前系统：${process.platform}）`)
+  }
+  try {
+    return execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
+      { input, encoding: 'utf8', timeout: 20000, windowsHide: true }
+    )
+  } catch (err) {
+    const code = err && err.code
+    if (code === 'EPERM' || code === 'ENOENT') {
+      throw new Error(
+        '调不起 powershell.exe，DPAPI 加密不可用（所在环境禁止启动子进程，或 PowerShell 被移除）。' +
+          '这种情况请改用 --creds-stdin / --ephemeral，别依赖「长期保留」。'
+      )
+    }
+    throw err
+  }
 }
 
-function protect(plain) {
+export function protect(plain) {
   const hex = ps(
     '$i=[Console]::In.ReadToEnd().TrimEnd([char]13,[char]10);' +
       '$s=ConvertTo-SecureString $i -AsPlainText -Force;' +
@@ -58,7 +77,7 @@ function protect(plain) {
   return hex
 }
 
-function unprotect(hex) {
+export function unprotect(hex) {
   const plain = ps(
     '$t=[Console]::In.ReadToEnd().Trim();' +
       '$s=ConvertTo-SecureString $t;' +

@@ -1,7 +1,7 @@
 {
-  "name": "browser-pilot",
-  "version": "0.4.1",
-  "description": "Agent-friendly controlled browser automation: sign in once and reuse it, with a credential dialog that can store secrets under Windows DPAPI. Opt-in zero-retention mode.",
+  "name": "browser-pilot-dsai",
+  "version": "0.5.0",
+  "description": "Agent-friendly browser control for DSH: attach to the Chrome you are already using, snapshot pages into ref handles, assert outcomes, and only touch credentials when a site really needs them. Opt-in zero-retention mode.",
   "type": "module",
   "license": "MIT",
   "bin": {
@@ -37,8 +37,8 @@
     "playwright",
     "browser-automation",
     "agent",
+    "cdp",
     "privacy",
-    "zero-retention",
     "dsh-plugin"
   ],
   "dependencies": {

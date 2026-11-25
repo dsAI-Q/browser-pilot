@@ -77,8 +77,10 @@ export function apply(ctx, config = {}) {
         name: 'browser_run',
         description:
           'Run a JSON action script in a real Chrome browser and return a per-step transcript plus screenshots. ' +
-          'Zero retention: no browsing history or cookies are written to disk, and URLs and credentials are redacted from every output file. ' +
-          'Credentials are never passed as parameters: they come from the BP_USER / BP_PASS environment variables (or the saved DSH secrets of the same names) and reach the browser through stdin only. A script needs them only when it contains a login action or a valueFrom field.',
+          'Reuses an existing sign-in: if Chrome has the chrome://inspect remote-debugging switch on it attaches to that browser and its open tabs, otherwise it uses its own persistent window. ' +
+          'Supports snapshot (produces ref:eN handles), assertions, retries, and cross-origin iframe switching. ' +
+          'Output files are redacted; a post-run leak audit fails the run if a URL or credential reached disk. ' +
+          'Credentials are never passed as parameters: they come from the BP_USER / BP_PASS environment variables (or the saved DSH secrets of the same names) and reach the browser through stdin only.',
         parameters: {
           scriptPath: {
             type: 'string',
@@ -108,15 +110,32 @@ export function apply(ctx, config = {}) {
             description:
               'Never open the credential dialog. Use in unattended runs: a script that needs credentials then fails fast instead of waiting for a human.',
           },
+          attach: {
+            type: 'boolean',
+            description:
+              'Require attaching to the Chrome you are already using (needs the chrome://inspect/#remote-debugging switch on). Fails with instructions instead of opening a separate browser.',
+          },
+          noAttach: {
+            type: 'boolean',
+            description: 'Never attach to your own Chrome; always use the separately managed window.',
+          },
+          auth: {
+            type: 'string',
+            description:
+              'Name of a saved cookie snapshot (see `browser-pilot auth save <name>`) to load before the steps run.',
+          },
         },
         output,
-        async execute({ scriptPath, outDir, headed, profile, ephemeral, noGui }) {
+        async execute({ scriptPath, outDir, headed, profile, ephemeral, noGui, attach, noAttach, auth }) {
           if (!scriptPath) return 'Missing scriptPath.'
           const args = ['run', path.resolve(workDir, scriptPath)]
           if (outDir) args.push('--out', path.resolve(workDir, outDir))
           if (headed) args.push('--headed')
           if (profile) args.push('--profile', path.resolve(workDir, profile))
           if (ephemeral) args.push('--ephemeral')
+          if (attach) args.push('--attach')
+          if (noAttach) args.push('--no-attach')
+          if (auth) args.push('--auth', String(auth))
           args.push('--channel', channel, '--timeout', String(timeout))
           if (process.env.BP_CREDS || process.env.DSH_SECRET_BP_CREDS || process.env.BP_USER || process.env.BP_PASS || process.env.DSH_SECRET_BP_USER || process.env.DSH_SECRET_BP_PASS) args.push('--creds-stdin')
           else if (noGui) args.push('--no-gui', '--no-prompt')

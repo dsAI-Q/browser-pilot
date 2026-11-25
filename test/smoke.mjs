@@ -19,6 +19,9 @@ import { needsCredentials, collectNeeded, parsePair } from '../src/prompt.mjs';
 import { makeRedactor, hostFingerprint } from '../src/redact.mjs';
 import { assertZeroRetention, prepareOutputDir } from '../src/policy.mjs';
 import { VERSION } from '../src/version.mjs';
+import { resolveRef, formatRefs } from '../src/refs.mjs';
+import { readActivePort, attachHelp, defaultChromeUserDataDir } from '../src/attach.mjs';
+import { safeAuthName } from '../src/auth.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const NODE = process.execPath;
@@ -106,10 +109,53 @@ check('站点指纹不含主机名', !hostFingerprint('https://a.example.com/x')
 
 const pkgRaw = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8');
 check('package.json 不带 BOM', !pkgRaw.startsWith('\uFEFF'));
-let pkgVersion = null;
-try { pkgVersion = JSON.parse(pkgRaw).version; } catch {}
-check('package.json 能被 JSON.parse', pkgVersion !== null);
-check('版本号常量与 package.json 一致', pkgVersion === VERSION, `${pkgVersion} vs ${VERSION}`);
+let pkg = null;
+try { pkg = JSON.parse(pkgRaw); } catch {}
+check('package.json 能被 JSON.parse', pkg !== null);
+check('版本号常量与 package.json 一致', pkg && pkg.version === VERSION, `${pkg && pkg.version} vs ${VERSION}`);
+check('包名是 browser-pilot-dsai', pkg && pkg.name === 'browser-pilot-dsai', pkg && pkg.name);
+check('包名全小写（npm 新包规则）', pkg && pkg.name === pkg.name.toLowerCase());
+
+// ref 解析：能取到选择器，取不到要报错而不是静默
+const refMap = { 'ref:e1': '#login', 'ref:e2': 'button.submit' };
+check('ref 能解析成选择器', resolveRef(refMap, 'ref:e2') === 'button.submit');
+let refThrew = false;
+try { resolveRef(refMap, 'ref:e9'); } catch { refThrew = true; }
+check('未知 ref 会报错', refThrew);
+check('ref 列表格式带制表符',
+  formatRefs([{ ref: 'ref:e1', role: 'button', name: '登录', tag: 'button' }]).includes('\t'));
+
+// attach 发现逻辑：没有 DevToolsActivePort 时必须返回 null（而不是瞎猜端口）
+const emptyDir = path.join(tmpRoot, 'chrome-empty');
+fs.mkdirSync(emptyDir, { recursive: true });
+check('没开远程调试时 readActivePort 返回 null', readActivePort(emptyDir) === null);
+const fakeDir = path.join(tmpRoot, 'chrome-fake');
+fs.mkdirSync(fakeDir, { recursive: true });
+fs.writeFileSync(path.join(fakeDir, 'DevToolsActivePort'), '9223\n/devtools/browser/abc-123\n', 'utf8');
+const ap = readActivePort(fakeDir);
+check('DevToolsActivePort 能解析出 ws 地址',
+  !!ap && ap.wsUrl === 'ws://127.0.0.1:9223/devtools/browser/abc-123', ap && ap.wsUrl);
+fs.writeFileSync(path.join(fakeDir, 'DevToolsActivePort'), 'not-a-port\n', 'utf8');
+check('DevToolsActivePort 格式不对时返回 null', readActivePort(fakeDir) === null);
+check('attach 指引里提到 chrome://inspect', attachHelp().includes('chrome://inspect'));
+check('默认 Chrome 配置目录是个绝对路径', path.isAbsolute(defaultChromeUserDataDir()));
+
+// 登录快照名：防路径穿越
+check('合法快照名通过', safeAuthName('app-login_1') === 'app-login_1');
+let nameThrew = false;
+try { safeAuthName('../etc/passwd'); } catch { nameThrew = true; }
+check('含路径分隔符的快照名被拒绝', nameThrew);
+
+// DPAPI 不可用时必须给明确错误，不能抛原始 EPERM（否则用户不知道该怎么办）
+let dpapiMsg = '';
+try {
+  const { protect } = await import('../src/creds.mjs');
+  protect('x');
+} catch (e) {
+  dpapiMsg = String(e.message || '');
+}
+const dpapiOk = dpapiMsg === '' || /DPAPI|powershell/.test(dpapiMsg);
+check('DPAPI 不可用时报错可读', dpapiOk, dpapiMsg.slice(0, 60));
 
 // ---------- B. CLI 行为 ----------
 process.stdout.write('--- B. CLI 行为 ---\n');

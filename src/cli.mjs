@@ -37,6 +37,8 @@ import {
 } from './prompt.mjs';
 import { loadRemembered, saveRemembered } from './creds.mjs';
 import { openSharedSession } from './shared.mjs';
+import { openAttachedSession, AttachUnavailable, attachHelp, readActivePort } from './attach.mjs';
+import { saveAuth, loadAuth, listAuth, forgetAuth } from './auth.mjs';
 import { VERSION } from './version.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -71,6 +73,10 @@ function parseArgs(argv) {
     else if (a === '--ephemeral') out.ephemeral = true;
     else if (a === '--no-gui') out.noGui = true;
     else if (a === '--cdp-port') out.cdpPort = Number(argv[++i]);
+    else if (a === '--attach') out.attach = true;
+    else if (a === '--no-attach') out.noAttach = true;
+    else if (a === '--user-data-dir') out.userDataDir = argv[++i];
+    else if (a === '--auth') out.auth = argv[++i];
     else if (a.startsWith('-')) {
       process.stderr.write(`未知选项：${a}\n`);
       usage(2);
@@ -124,11 +130,113 @@ function siteLabel(url) {
   }
 }
 
+/**
+ * 选浏览器：附着到你现有 Chrome → 自己维护的共享窗口 → 临时上下文。
+ *
+ * 默认策略：
+ *   - 你已经开了 chrome://inspect 的远程调试开关 → 直接附着，沿用你的登录态和已打开的标签
+ *   - 没开 → 用自己维护的窗口（登录一次后复用），不打扰你
+ *   - --attach 强制附着（失败就报错并给开启指引）；--no-attach 永不着附
+ *   - --ephemeral 走临时上下文，两者都不碰
+ */
+async function openAnySession(args, site) {
+  const channel = args.channel || 'chrome';
+  const timeout = args.timeout || 15000;
+
+  if (args.ephemeral) {
+    return await openSession({ headless: !args.headed, channel, timeout });
+  }
+
+  const udd = args.userDataDir || undefined;
+  if (!args.noAttach) {
+    const available = !!readActivePort(udd);
+    if (available || args.attach) {
+      try {
+        const s = await openAttachedSession({ userDataDir: udd, targetHost: site, timeout });
+        process.stderr.write('已附着到你正在用的 Chrome（沿用其登录态）\n');
+        return s;
+      } catch (err) {
+        if (!(err instanceof AttachUnavailable)) throw err;
+        process.stderr.write(`附着失败：${err.message}\n`);
+        if (args.attach) {
+          process.stderr.write(attachHelp(udd) + '\n');
+          process.exit(2);
+        }
+      }
+    } else if (args.attach) {
+      process.stderr.write(attachHelp(udd) + '\n');
+      process.exit(2);
+    }
+  }
+
+  return await openSharedSession({
+    channel,
+    timeout,
+    port: args.cdpPort || undefined,
+    profileDir: args.profile ? path.resolve(args.profile) : undefined,
+    targetHost: site,
+  });
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   if (!argv.length || argv[0] === '-h' || argv[0] === '--help') usage(0);
 
   const cmd = argv[0];
+
+  // ---- auth 子命令：登录态快照（cookie）----
+  if (cmd === 'auth') {
+    const sub = argv[1];
+    const rest = argv.slice(2);
+    if (sub === 'list') {
+      const rows = listAuth();
+      if (!rows.length) {
+        process.stdout.write('还没有保存过登录快照。用法：browser-pilot auth save <名字>\n');
+        return 0;
+      }
+      for (const r of rows) {
+        process.stdout.write(
+          r.error
+            ? `${r.name}\t${r.error}\n`
+            : `${r.name}\t保存于 ${r.savedAt}\t${r.cookies} 个 Cookie\t${r.domains} 个域名\n`
+        );
+      }
+      return 0;
+    }
+    if (sub === 'forget') {
+      const name = rest[0];
+      if (!name) {
+        process.stderr.write('用法：browser-pilot auth forget <名字>\n');
+        return 2;
+      }
+      const ok = forgetAuth(name);
+      process.stdout.write(ok ? `已删除快照 ${name}\n` : `没有找到快照 ${name}\n`);
+      return ok ? 0 : 1;
+    }
+    if (sub === 'save') {
+      const name = rest[0];
+      if (!name) {
+        process.stderr.write('用法：browser-pilot auth save <名字>\n');
+        return 2;
+      }
+      const args = parseArgs(rest.slice(1));
+      const session = await openAnySession(args, '', { interactive: true });
+      try {
+        const cookies = await session.context.cookies();
+        const r = saveAuth(name, cookies);
+        process.stdout.write(
+          `已保存登录快照 ${name}：${r.count} 个 Cookie（DPAPI 加密）\n${r.file}\n` +
+            '注意：Cookie 等价于登录凭据，别把这个文件拷给别人。\n'
+        );
+      } finally {
+        await session.close();
+      }
+      return 0;
+    }
+    process.stderr.write('用法：browser-pilot auth save|list|forget ...\n');
+    return 2;
+  }
+
   if (cmd !== 'run') {
     process.stderr.write(`未知命令：${cmd}\n`);
     usage(2);
@@ -228,32 +336,42 @@ async function main() {
     if (entry.status !== undefined) return `  http ${entry.status}`;
     if (entry.neterrors) return `  ${entry.neterrors}`;
     if (entry.frames) return `  frames=${entry.frames}`;
+    if (entry.frame) return `  frame=${entry.frame}`;
     if (entry.urlHost) return `  host=${entry.urlHost}`;
     if (entry.title) return `  ${entry.title}`;
+    if (entry.snapshot) return `  ${entry.count} 个引用${entry.refsFile ? '（refs.json）' : ''}`;
+    if (entry.asserted) return `  ok`;
+    if (entry.probe) return `  共 ${entry.probe.total} 个`;
+    if (entry.box) return `  ${entry.box}`;
     if (entry.text) return `  ${String(entry.text).slice(0, 160).replace(/\s+/g, ' ')}`;
     if (entry.count !== undefined) return `  ${entry.count}`;
     return '';
   };
   const log = (entry) => {
     const ok = entry.ok ? 'OK ' : 'FAIL';
-    transcript.push(`[${ok}] #${entry.index} ${entry.type}${pick(entry)} (${entry.ms}ms)`);
+    const retried = entry.retriedAfter ? `（重试 ${entry.retriedAfter} 次后成功）` : '';
+    transcript.push(`[${ok}] #${entry.index} ${entry.type}${pick(entry)} (${entry.ms}ms)${retried}`);
   };
 
-  // ---- 浏览器：默认复用「一直开着」的共享浏览器（登录一次就不再问）----
-  // --ephemeral 回到零留痕模式：每次全新临时上下文，不落 Cookie。
-  const session = args.ephemeral
-    ? await openSession({
-        headless: !args.headed,
-        channel: args.channel || 'chrome',
-        timeout: args.timeout || 15000,
-      })
-    : await openSharedSession({
-        channel: args.channel || 'chrome',
-        timeout: args.timeout || 15000,
-        port: args.cdpPort || undefined,
-        profileDir: args.profile ? path.resolve(args.profile) : undefined,
-        targetHost: site,
-      });
+  // ---- 登录态快照：先读文件（错了立刻报，不用等浏览器起来）----
+  let authCookies = null;
+  if (args.auth) {
+    try {
+      const data = loadAuth(args.auth);
+      authCookies = data.cookies;
+      process.stderr.write(`已载入登录快照 ${args.auth}（${data.cookies.length} 个 Cookie）\n`);
+    } catch (err) {
+      process.stderr.write(`${err.message}\n`);
+      return 2;
+    }
+  }
+
+  // ---- 浏览器：附着你现有的 Chrome → 自己的共享窗口 → 临时上下文 ----
+  const session = await openAnySession(args, site);
+
+  if (authCookies) {
+    await session.context.addCookies(authCookies);
+  }
 
   let results = [];
   let fatal = null;
@@ -264,6 +382,7 @@ async function main() {
       credentials,
       netErrors: session.netErrors,
       log,
+      state: { frame: null, frameLabel: null, refs: {} },
     });
   } catch (err) {
     fatal = redact(err?.message || String(err));
@@ -273,22 +392,31 @@ async function main() {
 
   // ---- 落盘（全部脱敏）----
   const manifest = {
-    tool: 'browser-pilot',
+    tool: 'browser-pilot-dsai',
     version: VERSION,
     startedAt: new Date().toISOString(),
     targetFingerprint: urls[0] ? hostFingerprint(urls[0]) : null,
     accountProvided: secrets.length > 0,
+    authSnapshot: args.auth || null,
     steps: results.length,
     failed: results.filter((r) => !r.ok).length,
     screenshots: results.filter((r) => r.file).length,
     zeroRetention: !!args.ephemeral,
-    sessionMode: args.ephemeral ? 'ephemeral' : 'shared',
+    sessionMode: args.ephemeral ? 'ephemeral' : session.attached ? 'attached' : 'shared',
     note: '本文件不含网址、账号或密码原文；targetFingerprint 是站点主机的不可逆哈希。',
   };
   fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   fs.writeFileSync(path.join(outDir, 'steps.json'), JSON.stringify(results, null, 2));
 
   process.stdout.write(transcript.join('\n') + '\n');
+
+  // snapshot 的结果单独成块输出：agent 下一步就是拿这些 ref 去操作
+  const snaps = results.filter((r) => r.snapshot);
+  for (const s of snaps) {
+    process.stdout.write(`\n--- snapshot #${s.index}（${s.count} 个可交互元素）---\n`);
+    process.stdout.write(s.snapshot + '\n');
+  }
+
   process.stdout.write(`输出目录：${outDir}\n`);
 
   // ---- 留痕自检 ----

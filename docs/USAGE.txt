@@ -1,82 +1,97 @@
-browser-pilot — 面向 agent 的受控浏览器操作工具
+browser-pilot-dsai — 面向 agent 的受控浏览器操作工具
 
-最简用法：
-  browser-pilot run 脚本.json
+最简用法（不需要任何账号）：
+  node src/cli.mjs run examples/open-and-shot.json
 
-  第一次运行会开一个 Chrome 窗口，你在里面登录一次；之后所有脚本都复用这个登录态。
-  窗口关了再打开，登录态还在（配置目录：%LOCALAPPDATA%\browser-pilot\profile）。
+浏览器从哪来（按顺序自动选）：
+  1) 你已经打开了 chrome://inspect/#remote-debugging 的远程调试开关
+     → 直接附着到你正在用的 Chrome，沿用其登录态和已打开的标签（Chrome ≥ 144）
+  2) 没开 → 用它自己维护的一个 Chrome 窗口，你在里面登录一次，之后一直复用
+  3) 加 --ephemeral → 临时上下文，用完即焚，不落 Cookie
 
-  脚本需要账号密码、而该站点没登录过时，会弹一个小窗口问，
-  可勾选「长期保留」——那会用 Windows DPAPI 加密存到
-  %LOCALAPPDATA%\browser-pilot\creds.json，只有本机当前用户能解开。
+账号密码什么时候会问：
+  站点已在那个浏览器里登录            不问
+  login 动作 + 该站点记住过           不问，用 DPAPI 里保存的那组
+  login 动作 + 没记住过               弹小窗口问（可勾选「长期保留」）
+  valueFrom: "user"/"pass"            只问缺的那个
+  其余（打开网页、截图、取文字、点击） 完全不用凭据
 
-  脚本只是打开页面、截图、取文字时，它一个字都不会问。
-
-其它用法：
+命令：
   browser-pilot run <script.json> [选项]
+  browser-pilot auth save <名字>      把当前浏览器的 Cookie 存成登录快照（DPAPI 加密）
+  browser-pilot auth list             列出快照（只报数量，不打印域名）
+  browser-pilot auth forget <名字>    删除快照
 
 选项：
-  --out <dir>         输出目录（默认 ./.bp-out/<时间戳>）
-  --ephemeral         零留痕模式：每次全新内存上下文，不落 Cookie 与历史
-  --headed            显示浏览器窗口（共享模式下窗口本来就是可见的）
-  --profile <dir>     指定共享浏览器的配置目录
-  --cdp-port <n>      共享浏览器调试端口，默认 9222，冲突时换一个
-  --channel <name>    chrome（默认）| msedge
-  --timeout <ms>      单步默认超时，默认 15000
-  --creds-file <p>    从 JSON 文件读凭据 {user, pass}
-  --creds-stdin       从标准输入读凭据（JSON，或一行「账号|密码」）
-  --no-gui            不弹图形窗口
-  --no-prompt         缺少凭据时不要询问，直接报错（适合 CI）
-  --no-audit          跳过留痕自检（不推荐，仅供调试）
-
-何时会问你要账号：
-  站点已在共享窗口登录                       不问，直接用
-  login 动作 + 该站点记住过                  不问，自动取
-  login 动作 + 没记住过                      弹窗问（可勾选长期保留）
-  { "valueFrom": "user" } / "pass"           只问缺的那个
-  其余（打开网页、截图、取文字、点击、滚动）  完全不用凭据
+  --out <dir>          输出目录（默认 ./.bp-out/<时间戳>）
+  --ephemeral          零留痕：每次全新内存上下文
+  --attach             强制附着你现有的 Chrome（失败则报错并给出开启指引）
+  --no-attach          永不着附，只用自己维护的窗口
+  --user-data-dir <p>  指定 Chrome 配置目录（多 profile 时用）
+  --auth <名字>        运行前灌入某个登录快照的 Cookie
+  --profile <dir>      自己维护窗口的配置目录
+  --cdp-port <n>       自己维护窗口的调试端口，默认 9222
+  --channel <name>     chrome（默认）| msedge
+  --timeout <ms>       单步默认超时，默认 15000
+  --headed             显示窗口（自己维护窗口模式下本来就可见）
+  --creds-stdin        从标准输入读凭据（JSON 或一行「账号|密码」）
+  --creds-file <p>     从 JSON 文件读凭据 {user, pass}
+  --no-gui             不弹图形窗口
+  --no-prompt          缺凭据时直接报错（CI）
+  --no-audit           跳过留痕自检（仅调试用）
 
 凭据来源优先级：
   --creds-stdin > --creds-file > 环境变量 BP_CREDS / BP_USER+BP_PASS
   > 该站点记住的（DPAPI）> 图形弹窗 > 终端询问
-
-  凭据永远不写进脚本文件，脚本可以安全提交进 Git。
 
 脚本格式（JSON）：
   {
     "url": "https://example.com/login",
     "steps": [
       { "type": "goto",  "url": "https://example.com/login" },
-      { "type": "login", "userSelector": "#user", "passSelector": "#pass",
-        "submitSelector": "button[type=submit]" },
-      { "type": "wait",  "ms": 2000 },
-      { "type": "shot",  "name": "01-after-login" },
-      { "type": "text",  "selector": "h1" }
+      { "type": "snapshot" },
+      { "type": "fill",  "ref": "ref:e1", "value": "me@example.com" },
+      { "type": "click", "ref": "ref:e3", "retries": 2 },
+      { "type": "asserturl", "contains": "/dashboard" },
+      { "type": "shot",  "name": "01-after-login" }
     ]
   }
 
-动作类型：
-  goto       打开网址            url, waitUntil
-  wait       等待                ms / selector / text + state + timeout
-  shot       截图                name, fullPage
-  click      点击                selector / text / role+name / placeholder / label, force
-  dblclick   双击                同上
-  fill       填空（含 contenteditable）  同上 + value / valueFrom, force
-  type       键盘逐字输入        value, delay
-  selectall  全选当前焦点内容    —
-  press      按键                key（默认 Enter）
-  login      登录组合            userSelector, passSelector, submitSelector
-  text       取文字              定位（不给取 body）, max
-  dom        取元素 HTML         定位, max
-  probe      列元素信息          selector, max
-  bbox       取元素坐标尺寸      定位
-  count      元素计数            selector
-  title      取标题              —
-  url        当前网址            —
-  urlhost    只取主机名          —
-  frames     列框架主机名        —
-  neterrors  列失败请求          max
-  scroll     滚动                y
-  clickxy    按坐标点击          x, y（坐标会随窗口尺寸/缩放失准，优先用选择器）
+定位优先级：ref > selector > text > role+name > placeholder > label
 
-退出码：0 成功 / 1 有步骤失败 / 2 用法或凭据错误 / 3 留痕自检失败
+动作类型：
+  goto          打开网址              url, waitUntil
+  wait          等待                  ms / ref / selector / text + state + timeout
+  snapshot      扫页面产出 ref:eN     max, save
+  click         点击                  ref / selector / text / … + force
+  dblclick      双击                  同上
+  fill          填空（含 contenteditable） ref / selector / … + value / valueFrom
+  type          键盘逐字输入          value, delay
+  selectall     全选当前焦点内容      —
+  press         按键                  key（默认 Enter）
+  login         登录组合              userSelector, passSelector, submitSelector
+  text          取文字                定位（不给取 body）, max
+  dom           取元素 HTML           定位, max
+  probe         列元素信息            ref / selector, max
+  bbox          取元素坐标尺寸        定位
+  count         元素计数              ref / selector
+  scroll        滚动                  y
+  clickxy       按坐标点击            x, y（缩放一变就失准，优先 ref）
+  title / url / urlhost               取标题 / 网址 / 主机名
+  frames        列框架主机名          —
+  switchframe   切进 iframe（含跨域）  ref / selector / url / name / index
+  switchtomain  切回主框架            —
+  neterrors     列失败请求            max
+  asserturl     断言网址              contains / exact / regex
+  asserttext    断言文字              定位 + contains / equals / regex
+  assertcount   断言数量              ref / selector + equals / min / max
+  assertvisible 断言可见性            定位 + visible:false 表示断言不可见
+
+每步通用字段：
+  retries      失败后重试次数（默认 0）
+  retryDelay   重试间隔毫秒（默认 500）
+  timeout      该步超时
+  hint         失败时附加的提示文字
+  continueOnError  失败也继续下一步
+
+退出码：0 成功 / 1 有步骤失败 / 2 用法或凭据错误 / 3 留痕自检失败 / 130 用户取消
