@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
  * browser-pilot CLI
  *
@@ -63,7 +63,7 @@ function loadCredentials(args) {
   // --creds-stdin 是异步读的，由 main 处理
   if (args.credsStdin) return null;
   if (args.credsFile) {
-    return JSON.parse(fs.readFileSync(path.resolve(args.credsFile), 'utf8'));
+    return readJsonFile(args.credsFile);
   }
   const { BP_USER, BP_PASS } = process.env;
   if (BP_USER || BP_PASS) return { user: BP_USER, pass: BP_PASS };
@@ -77,6 +77,16 @@ function stamp() {
     `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-` +
     `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
   );
+}
+
+/**
+ * 读 JSON 文件，自动剥掉 UTF-8 BOM。
+ * Windows 上 PowerShell 的 Set-Content -Encoding UTF8 默认会写 BOM，
+ * 不处理会导致 JSON.parse 直接报 "Unexpected token ''"。
+ */
+function readJsonFile(p) {
+  const raw = fs.readFileSync(path.resolve(p), 'utf8');
+  return JSON.parse(raw.replace(/^\uFEFF/, ''));
 }
 
 async function main() {
@@ -96,7 +106,7 @@ async function main() {
     usage(2);
   }
 
-  const script = JSON.parse(fs.readFileSync(path.resolve(scriptPath), 'utf8'));
+  const script = readJsonFile(scriptPath);
 
   // ---- 凭据 ----
   let credentials = loadCredentials(args);
