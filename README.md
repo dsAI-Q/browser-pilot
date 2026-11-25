@@ -31,20 +31,30 @@
 ## 附着到你现有的 Chrome
 
 ```bash
-# 1) Chrome ≥ 144，地址栏打开：
+# 1) Chrome ≥ 144，在你日常那个 Chrome 里打开：
 #    chrome://inspect/#remote-debugging
-#    把远程调试开关打开（一次性，重启 Chrome 仍然有效）
+#    勾上 "Allow remote debugging for this browser instance"
+#    （页面显示 Server running at 127.0.0.1:9222 即可，重启 Chrome 仍有效）
 
 # 2) 直接跑脚本，第一次连接 Chrome 会弹授权框，点「允许」
 node src/cli.mjs run examples/open-and-shot.json
-# 已附着到你正在用的 Chrome（沿用其登录态）
+# 已附着到你正在用的 Chrome（沿用其登录态，通过 DevToolsActivePort）
 ```
 
-它不碰你的命令行、不复制 profile：只读 Chrome 自己写的 `DevToolsActivePort`（端口 + 浏览器 WebSocket 路径）然后连上去。想强制验证：
+它不碰你的命令行、不复制 profile、不读 `Cookies` 数据库：只读 Chrome 自己写的
+`<配置目录>\DevToolsActivePort`（第一行端口、第二行浏览器 WebSocket 路径）然后连上去。
+
+两个实测细节：
+
+- **HTTP 探针可能被关掉**：开关打开后 `http://127.0.0.1:9222/json/version` 有时返回 404（本机 Chrome 158 就是这样），所以**以 `DevToolsActivePort` 为准**，HTTP 只作兜底。
+- **端口别抢**：这个开关固定绑定 9222；工具自己的共享窗口默认用 **9333**，两者互不影响。
+
+想强制验证：
 
 ```bash
 node src/cli.mjs run my.json --attach     # 没开开关就报错，并打印开启步骤
 node src/cli.mjs run my.json --no-attach  # 永不着附
+node src/cli.mjs run my.json --user-data-dir "C:\path\to\User Data"   # 多 profile 时指定
 ```
 
 ## 抓到能点的引用：snapshot
@@ -314,7 +324,7 @@ browser-pilot run my.json --creds-file C:\path\to\creds.json
 --auth <名字>      # 运行前灌入登录快照
 --ephemeral        # 零留痕模式（每次干净开局）
 --headed           # 显示浏览器窗口（共享窗口模式下本来就可见）
---cdp-port 9222    # 共享浏览器的调试端口，冲突时换一个
+--cdp-port 9333    # 共享窗口的调试端口，冲突时换一个（默认 9333，把 9222 让给你的 Chrome）
 --profile <dir>    # 指定共享浏览器的配置目录
 --channel msedge   # 用 Edge 而不是 Chrome
 ```

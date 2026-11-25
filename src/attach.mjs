@@ -135,7 +135,8 @@ export async function openAttachedSession(opts = {}) {
 
   let browser;
   try {
-    browser = await chromium.connectOverCDP(wsUrl, { timeout });
+    // 首次连接 Chrome 会弹授权框，等人点「允许」，所以给足时间
+    browser = await chromium.connectOverCDP(wsUrl, { timeout: Math.max(timeout, 60000) });
   } catch (err) {
     throw new AttachUnavailable(
       `连接 Chrome 失败（${wsUrl}）。如果 Chrome 刚刚重启过，` +
