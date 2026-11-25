@@ -153,7 +153,7 @@ async function openAnySession(args, site) {
     if (available || args.attach) {
       try {
         const s = await openAttachedSession({ userDataDir: udd, targetHost: site, timeout });
-        process.stderr.write('已附着到你正在用的 Chrome（沿用其登录态）\n');
+        process.stderr.write(`已附着到你正在用的 Chrome（沿用其登录态，通过 ${s.attachVia}）\n`);
         return s;
       } catch (err) {
         if (!(err instanceof AttachUnavailable)) throw err;
@@ -403,6 +403,7 @@ async function main() {
     screenshots: results.filter((r) => r.file).length,
     zeroRetention: !!args.ephemeral,
     sessionMode: args.ephemeral ? 'ephemeral' : session.attached ? 'attached' : 'shared',
+    attachVia: session.attachVia || null,
     note: '本文件不含网址、账号或密码原文；targetFingerprint 是站点主机的不可逆哈希。',
   };
   fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));

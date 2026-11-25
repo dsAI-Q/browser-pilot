@@ -143,7 +143,14 @@ async function execStep(page, step, ctx, state, entry) {
     case 'shot': {
       const name = String(step.name || `shot-${entry.index}`).replace(/[^\w.-]+/g, '_');
       const file = path.join(ctx.outDir, `${String(entry.index).padStart(2, '0')}-${name}.png`);
-      await page.screenshot({ path: file, fullPage: !!step.fullPage });
+      // 动画一直跑的页面（编辑器、数据大屏）截图会卡住，给足超时并默认冻结动画
+      await page.screenshot({
+        path: file,
+        fullPage: !!step.fullPage,
+        timeout: step.timeout ?? 30000,
+        animations: step.animations === false ? 'allow' : 'disabled',
+        caret: 'hide',
+      });
       entry.file = path.basename(file);
       break;
     }

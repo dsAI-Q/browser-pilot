@@ -18,7 +18,9 @@ import os from 'node:os'
 import { chromium } from 'playwright-core'
 import { DEFAULT_VIEWPORT } from './session.mjs'
 
-const DEFAULT_PORT = Number(process.env.BP_CDP_PORT || 9222)
+// 默认端口刻意避开 9222：9222 留给你自己 Chrome 的 chrome://inspect 开关，
+// 两边抢同一个端口会让「附着你的浏览器」直接失效。
+const DEFAULT_PORT = Number(process.env.BP_CDP_PORT || 9333)
 
 function defaultProfileDir() {
   if (process.platform === 'win32') {
