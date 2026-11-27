@@ -4,6 +4,7 @@
 
 > 包名：`@dsai-q/browser-pilot`
 > ⚠️ npm 上的裸名 `browser-pilot` 是**另一个项目**（svilupp/browser-pilot），别装错。
+> 国内镜像（Gitee）：<https://gitee.com/big-orange-digital-person/browser-pilot>
 
 ---
 
