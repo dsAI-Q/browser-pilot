@@ -41,6 +41,18 @@
     "privacy",
     "dsh-plugin"
   ],
+  "homepage": "https://github.com/dsAI-Q/browser-pilot#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dsAI-Q/browser-pilot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dsAI-Q/browser-pilot/issues"
+  },
+  "author": "dsAI-Q",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "playwright-core": "^1.48.0"
   }
